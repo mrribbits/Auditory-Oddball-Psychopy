@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE / editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# PsychoPy logs
+*.log
+lastRun.log
+
+# EyeLink / instrument raw outputs
+*.EDF
+*.edf
+*.asc
+
+# Experiment output (subject data — NEVER commit)
+results/
+data/
+output/
+
+# Backup files
+*.bak
+*.old
