@@ -106,9 +106,8 @@ edge via DPxWriteRegCacheAfterVideoSync.
 
 The physical tube-to-ear transit through the OPM headphone system is a
 separate constant acoustic latency that must be measured once with a
-microphone at the earpiece (FieldTrip reports 7.0 ms for their sound
-showers) and subtracted from MMN peak latencies in analysis. That
-measurement is orthogonal to the audio-backend choice above.
+microphone at the earpiece and subtracted from MMN peak latencies in 
+analysis. That measurement is orthogonal to the audio-backend choice above.
 
 
 TRIGGER SCHEME (VPIXX Pixel Mode B, blue channel only)

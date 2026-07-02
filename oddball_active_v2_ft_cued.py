@@ -70,9 +70,8 @@ framebuffer at vsync, not from the illuminated display.
 The only remaining delay in the auditory pathway is the physical
 tube-to-ear transit through the OPM headphone system - a constant
 acoustic latency that needs to be measured once with a microphone at
-the earpiece (FieldTrip reports 7.0 ms for their sound showers) and
-subtracted from MMN peak latencies in analysis. That measurement is a
-property of the audio path, not the software.
+the earpiece and subtracted from MMN peak latencies in analysis. 
+That measurement is a property of the audio path, not the software.
 
 IMPORTANT INVARIANT: between prep_tone_schedule and the DPxStartAudSched
 + DPxWriteRegCacheAfterVideoSync pair, no other code may call
