@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Audio Latency Measurement via BBTK
+Audio Latency Measurement via BBTK  (VPIXX vs PsychoPy comparison)
 ========================================================================
 
 PURPOSE
@@ -9,46 +9,92 @@ PURPOSE
 Measure the acoustic transit delay of the OPM-MEG headphone system --
 i.e. the time from the software/hardware trigger that starts audio
 playback to the moment the sound emerges at the earpiece. This latency
-is dominated by the pneumatic tubing but also includes DAC output
-buffer, amplifier, and driver contributions.
+is a constant offset that MMN peak latencies (and any tightly time-
+locked auditory analysis) need to be corrected by.
 
-The measured value is a constant offset that tightly time-locked auditory
-analysis) should be corrected by.
+This script supports TWO audio paths, selectable via the AUDIO_PATH
+parameter:
+
+    'vpixx'    : audio played by the VPIXX DATAPixx3 audio subsystem
+                 (hardware-scheduled, vsync-locked). This is the
+                 ground truth for the audio path used by
+                 oddball_active_v2_ft_cued.py.
+
+    'psychopy' : audio played by psychopy.sound.Sound with the PTB
+                 backend, prescheduled via play(when=nextFlipPTB).
+                 This is the audio path used by the two
+                 psychopy_audio / pyaud_kbd oddball variants.
+
+Run both, subtract, and you have a quantitative comparison of the
+extra latency (and jitter) that PsychoPy PTB introduces over the
+VPIXX ground truth.
+
+CAVEAT: the two paths use different hardware to reach the amplifier
+(VPIXX DAC vs. computer sound card), so the difference is not purely
+"PsychoPy software overhead" -- it is "VPIXX-audio path" vs.
+"PsychoPy-audio path" in aggregate. On modern computer sound cards the
+DAC contribution is typically well under a ms and the difference is
+dominated by PsychoPy's software latency, but that assumption is
+worth verifying on your hardware.
 
 SETUP
 -----
-    VPIXX DOUT (Pixel Mode B) --> BBTK digital input channel 1
-    Microphone at earpiece    --> BBTK digital input channel 2
-                                  (via preamp / threshold detector
-                                  if the mic itself is analog; or
-                                  direct-in if the mic module already
-                                  emits TTL on sound detection)
+    VPIXX DOUT (Pixel Mode B) --> BBTK digital input channel 1  (pixel_trigger)
+    Microphone at earpiece    --> BBTK digital input channel 2  (mic)
 
-Both channels feed the same BBTK. On each trial the script fires a
-pixel-mode trigger at the exact vsync that starts audio playback via
-the VPIXX audio schedule; a moment later the sound emerges at the
-earpiece and the mic reports it to BBTK. Both events are timestamped
-by BBTK on a single clock, so their difference is the audio-path
-latency (tube + any BBTK detection delay), free of cross-device clock
-reconciliation.
+    Audio source (depending on AUDIO_PATH):
+      AUDIO_PATH = 'vpixx'    -> VPIXX audio-out cable to amplifier
+      AUDIO_PATH = 'psychopy' -> computer sound card cable to amplifier
+
+    The amplifier + pneumatic tubes + earpiece + mic path is the same
+    for both audio paths -- only the source cable to the amplifier
+    changes. Physically re-wire the amplifier input (or use whatever
+    mixer/switcher your lab has) before switching AUDIO_PATH.
+
+Both trigger and mic feed the same BBTK, so their timestamps live on
+one clock and their difference is the audio-path latency free of
+cross-device clock reconciliation.
 
 Configure the BBTK software (BBTKPy / BBTK Software Suite) for:
     - Channel 1 name: pixel_trigger  (rising edge, TTL)
     - Channel 2 name: mic            (rising edge on sound onset)
-    - Sample rate  : as high as your BBTK model supports (1 kHz or
-                     4 kHz typical)
+    - Sample rate  : as high as your BBTK model supports
     - Recording    : begin recording BEFORE starting this script;
                      stop after the script exits
     - Export       : one row per detected edge, with timestamps
 
-For each trial the BBTK file should contain a pair of events:
+For each trial the BBTK file contains a pair of events:
     pixel_trigger @ t_N
     mic           @ t_N + latency
 
-The distribution of (t_mic - t_pixel_trigger) over 200 trials is your
-latency measurement. Mean = the correction constant to apply in
+The distribution of (t_mic - t_pixel_trigger) over 200 trials is the
+audio-path latency. Mean = the correction constant to apply in
 analysis. SD tells you jitter of the audio path.
 
+RECOMMENDED WORKFLOW
+--------------------
+    1. Wire up the physical setup (see SETUP above).
+    2. Start BBTK recording. Confirm channel names.
+    3. Rewire amp input to VPIXX audio output.
+       Run this script with AUDIO_PATH='vpixx'. Record the resulting
+       BBTK export as, e.g., latency_vpixx_click.csv. Compute mean
+       and SD. This is L_vpixx.
+    4. Rewire amp input to computer sound-card output.
+       Run again with AUDIO_PATH='psychopy'. Same stimulus, same
+       trial count. Record as latency_psychopy_click.csv. Compute
+       mean and SD. This is L_psychopy.
+    5. Extra PsychoPy overhead ~ L_psychopy - L_vpixx.
+       Jitter comparison: SD_psychopy vs. SD_vpixx.
+    6. Optionally repeat with a different TONE_TYPE (e.g. 'sine' after
+       'click') to confirm the numbers are frequency-independent.
+
+WHY THIS DESIGN
+---------------
+    - No MEG scanner time required; measure any time in the lab.
+    - Same-device (BBTK) reference and measurement means no cross-
+      device clock skew to correct.
+    - BBTK software gives a purpose-built latency histogram/report.
+    - Fast iteration when adjusting the audio path.
 
 STIMULUS OPTIONS
 ----------------
@@ -77,8 +123,8 @@ Recommendation: measure with 'click' for the sharpest reference, then
 also run 'sine' to confirm the latency you'll apply to your paradigm's
 actual stimuli. Difference should be small (a few hundred us at most).
 
-TIMING
-------
+TIMING (VPIXX mode)
+-------------------
 Per trial:
     1. Configure the VPIXX audio schedule (once per tone).
     2. DPxStartAudSched (arm on local register).
@@ -90,6 +136,21 @@ Per trial:
     7. Set trigger pixel to TRIGGER_RESET, flip.
     8. Wait for jittered ISI (1.8-2.2 s).
 
+TIMING (PsychoPy mode)
+----------------------
+Per trial:
+    1. Set trigger pixel color to TRIGGER_ON.
+    2. Preschedule PTB audio via play(when=win.getFutureFlipTime(clock='ptb')).
+    3. win.flip() unblocks at the vsync -> MEG trigger edge fires from
+       the framebuffer; PTB begins audio playback at (approximately)
+       the same instant.
+    4. Wait for tone_duration.
+    5. Set trigger pixel to TRIGGER_RESET, flip.
+    6. Wait for jittered ISI (1.8-2.2 s).
+
+Both modes use DPxWriteRegCacheAfterVideoSync semantics for the
+pixel-trigger vsync alignment (in VPIXX mode explicitly; in PsychoPy
+mode implicitly via win.flip() blocking on the same vsync).
 
 BACKUP CSV
 ----------
@@ -117,7 +178,17 @@ import sys
 import csv
 
 import numpy as np
-from psychopy import visual, core, event, gui, data, logging
+
+# Set audio backend preference BEFORE importing psychopy.sound.
+# For this measurement we insist on PTB when AUDIO_PATH='psychopy',
+# because the whole point is to measure what a PTB-driven paradigm
+# will incur. sounddevice is listed as a fallback so the import
+# succeeds on machines without psychtoolbox -- but we assert PTB is
+# actually loaded before running the PsychoPy-mode measurement.
+from psychopy import prefs
+prefs.hardware['audioLib'] = ['ptb', 'sounddevice']
+
+from psychopy import visual, sound, core, event, gui, data, logging
 from pypixxlib import _libdpx as dp
 
 logging.console.setLevel(logging.CRITICAL)
@@ -131,6 +202,14 @@ if len(script_path) != 0:
 # =============================================================================
 # EXPERIMENT PARAMETERS
 # =============================================================================
+
+# --- Audio path: pick which audio subsystem plays the tone ---
+# 'vpixx'    : VPIXX audio schedule (hardware-locked to vsync).
+#              Use this to measure the ground-truth tube latency.
+# 'psychopy' : psychopy.sound with PTB backend (prescheduled to next vsync).
+#              Use this to measure the tube latency + software overhead
+#              of the PsychoPy-audio oddball scripts.
+AUDIO_PATH = 'vpixx'       # 'vpixx' | 'psychopy'
 
 # --- Stimulus type: pick one ---
 # Read the STIMULUS OPTIONS section of the docstring before choosing.
@@ -188,24 +267,29 @@ def _apply_cosine_ramps(wave, n_ramp):
     return wave
 
 
-def _to_int16(wave, amplitude):
+def to_vpixx_int16(wave, amplitude):
     """Scale a float waveform in [-1, +1] to int16 for the VPIXX buffer."""
     wave = np.clip(wave * amplitude, -1.0, 1.0)
     return (wave * 32767.0).astype(np.int16)
 
 
-def make_sine(frequency, duration, sample_rate, ramp_duration, amplitude):
-    """Sine tone with cosine on/off ramps."""
+def to_psychopy_float32(wave, amplitude):
+    """Scale a float waveform in [-1, +1] to float32 for psychopy.sound.Sound."""
+    return np.clip(wave * amplitude, -1.0, 1.0).astype(np.float32)
+
+
+def make_sine(frequency, duration, sample_rate, ramp_duration):
+    """Sine tone with cosine on/off ramps. Returns float64 in [-1, +1]."""
     n_samples = int(duration * sample_rate)
     n_ramp    = int(ramp_duration * sample_rate)
     t = np.linspace(0, duration, n_samples, endpoint=False)
     wave = np.sin(2.0 * np.pi * frequency * t)
     wave = _apply_cosine_ramps(wave, n_ramp)
-    return _to_int16(wave, amplitude)
+    return wave
 
 
-def make_click(duration, sample_rate, ramp_duration, amplitude):
-    """Rectangular pulse with short cosine ramps to suppress offset click.
+def make_click(duration, sample_rate, ramp_duration):
+    """Rectangular pulse with short cosine ramps. Returns float64 in [-1, +1].
 
     Onset ramp is intentionally short (~0.5 ms by default) so it does not
     noticeably delay the mic's threshold crossing at BBTK. The offset
@@ -215,16 +299,16 @@ def make_click(duration, sample_rate, ramp_duration, amplitude):
     n_ramp    = int(ramp_duration * sample_rate)
     wave = np.ones(n_samples, dtype=np.float64)
     wave = _apply_cosine_ramps(wave, n_ramp)
-    return _to_int16(wave, amplitude)
+    return wave
 
 
 def make_noise_burst(center_freq, bandwidth, duration, sample_rate,
-                     ramp_duration, amplitude, seed=None):
+                     ramp_duration, seed=None):
     """Band-limited noise burst via FFT masking, with cosine on/off ramps.
 
     Uses numpy's FFT (no scipy dependency). The band is a rectangular
     window in the frequency domain from center - bw/2 to center + bw/2.
-    Result is normalized so its peak matches `amplitude`.
+    Result is normalized so its peak equals 1. Returns float64.
     """
     n_samples = int(duration * sample_rate)
     n_ramp    = int(ramp_duration * sample_rate)
@@ -246,23 +330,28 @@ def make_noise_burst(center_freq, bandwidth, duration, sample_rate,
         wave = wave / peak
 
     wave = _apply_cosine_ramps(wave, n_ramp)
-    return _to_int16(wave, amplitude)
+    return wave
 
 
 def build_stimulus(tone_type):
-    """Dispatch to the requested waveform generator."""
+    """Dispatch to the requested waveform generator.
+
+    Returns
+    -------
+    wave : float64 numpy array in [-1, +1], no amplitude applied.
+    label : human-readable stimulus description.
+    """
     if tone_type == 'sine':
         wave = make_sine(SINE_FREQ, SINE_DURATION, AUDIO_SAMPLE_RATE,
-                         SINE_RAMP, AUDIO_AMPLITUDE)
+                         SINE_RAMP)
         label = f'sine {SINE_FREQ} Hz, {SINE_DURATION*1000:.0f} ms'
     elif tone_type == 'click':
-        wave = make_click(CLICK_DURATION, AUDIO_SAMPLE_RATE,
-                          CLICK_RAMP, AUDIO_AMPLITUDE)
+        wave = make_click(CLICK_DURATION, AUDIO_SAMPLE_RATE, CLICK_RAMP)
         label = f'click {CLICK_DURATION*1000:.1f} ms'
     elif tone_type == 'noise':
         wave = make_noise_burst(NOISE_CENTER_FREQ, NOISE_BANDWIDTH,
                                 NOISE_DURATION, AUDIO_SAMPLE_RATE,
-                                NOISE_RAMP, AUDIO_AMPLITUDE)
+                                NOISE_RAMP)
         label = (f'noise burst {NOISE_CENTER_FREQ} Hz ± {NOISE_BANDWIDTH/2:.0f}, '
                  f'{NOISE_DURATION*1000:.0f} ms')
     else:
@@ -368,14 +457,20 @@ def terminate(win, csv_path, trial_log):
 # =============================================================================
 
 # --- Session info dialog ---
-info = {'measurement_id': '', 'tone_type': TONE_TYPE}
+info = {'measurement_id': '',
+        'audio_path':     AUDIO_PATH,
+        'tone_type':      TONE_TYPE}
 dlg = gui.DlgFromDict(dictionary=info,
                       title='Audio Latency Measurement',
-                      order=['measurement_id', 'tone_type'])
+                      order=['measurement_id', 'audio_path', 'tone_type'])
 if not dlg.OK:
     core.quit()
 
-TONE_TYPE = info['tone_type']    # allow override from dialog
+AUDIO_PATH = info['audio_path']    # allow override from dialog
+TONE_TYPE  = info['tone_type']
+if AUDIO_PATH not in ('vpixx', 'psychopy'):
+    print(f"ERROR: audio_path must be 'vpixx' or 'psychopy', got '{AUDIO_PATH}'")
+    sys.exit(1)
 info['date'] = data.getDateStr()
 
 # --- Output CSV path ---
@@ -386,7 +481,7 @@ mid = info['measurement_id'].strip() or 'unnamed'
 mid = mid.replace('/', '_').replace(' ', '_')
 csv_path = os.path.join(
     results_folder,
-    f'audio_latency_{mid}_{TONE_TYPE}_{info["date"]}.csv'
+    f'audio_latency_{mid}_{AUDIO_PATH}_{TONE_TYPE}_{info["date"]}.csv'
 )
 
 
@@ -394,14 +489,44 @@ csv_path = os.path.join(
 init_vpixx()
 
 
-# --- Build and load stimulus ---
-stim_wave, stim_label = build_stimulus(TONE_TYPE)
-stim_n_samples = int(len(stim_wave))
-load_tone_into_buffer(stim_wave, AUDIO_BUFFER_ADDR)
+# --- Build stimulus (float64 in [-1, +1], no amplitude yet) ---
+stim_wave_norm, stim_label = build_stimulus(TONE_TYPE)
+stim_n_samples = int(len(stim_wave_norm))
+tone_dur       = stim_n_samples / AUDIO_SAMPLE_RATE
 
-print(f"Stimulus: {stim_label}")
-print(f"Duration: {stim_n_samples / AUDIO_SAMPLE_RATE * 1000:.2f} ms "
+print(f"Audio path: {AUDIO_PATH}")
+print(f"Stimulus:   {stim_label}")
+print(f"Duration:   {tone_dur * 1000:.2f} ms "
       f"({stim_n_samples} samples @ {AUDIO_SAMPLE_RATE} Hz)")
+
+
+# --- Load stimulus into the selected audio subsystem ---
+tone_sound = None   # only set in psychopy mode
+
+if AUDIO_PATH == 'vpixx':
+    stim_int16 = to_vpixx_int16(stim_wave_norm, AUDIO_AMPLITUDE)
+    load_tone_into_buffer(stim_int16, AUDIO_BUFFER_ADDR)
+    print(f"Loaded {len(stim_int16)} int16 samples to VPIXX buffer at "
+          f"0x{AUDIO_BUFFER_ADDR:X}.")
+
+elif AUDIO_PATH == 'psychopy':
+    stim_float32 = to_psychopy_float32(stim_wave_norm, AUDIO_AMPLITUDE)
+    tone_sound = sound.Sound(value=stim_float32,
+                              sampleRate=AUDIO_SAMPLE_RATE,
+                              stereo=False)
+    _backend_module = type(tone_sound).__module__
+    print(f"PsychoPy sound backend: {_backend_module}")
+    if 'backend_ptb' not in _backend_module:
+        print("=" * 60)
+        print("ERROR: expected PTB audio backend but a different backend")
+        print(f"  loaded ({_backend_module}). This measurement requires PTB")
+        print("  for precise vsync-locked audio scheduling.")
+        print()
+        print("  Install psychtoolbox:   pip install psychtoolbox")
+        print("  Or set AUDIO_PATH='vpixx' to use VPIXX audio instead.")
+        print("=" * 60)
+        close_vpixx()
+        sys.exit(1)
 
 
 # --- Precompute jittered ISIs ---
@@ -443,6 +568,7 @@ instr = visual.TextStim(
     win,
     text=(
         "Audio Latency Measurement\n\n"
+        f"Audio path     : {AUDIO_PATH}\n"
         f"Stimulus       : {stim_label}\n"
         f"Trials         : {N_TRIALS}\n"
         f"ISI            : {ISI_MIN}-{ISI_MAX} s (jittered)\n\n"
@@ -450,10 +576,12 @@ instr = visual.TextStim(
         "  - Recording\n"
         "  - Channel 1 wired to VPIXX DOUT (pixel_trigger)\n"
         "  - Channel 2 wired to earpiece mic (mic)\n\n"
+        f"Confirm the amplifier input is wired to the {AUDIO_PATH.upper()}\n"
+        f"audio output (not the other one).\n\n"
         "Press SPACE to begin measurement.\n"
         "Press ESC to abort at any time."
     ),
-    color='white', height=26, wrapWidth=1000,
+    color='white', height=24, wrapWidth=1000,
 )
 progress = visual.TextStim(
     win, text='', color='white', height=24, pos=(0, 0),
@@ -482,29 +610,45 @@ trial_log = []
 
 for trial_num in range(N_TRIALS):
 
-    # Progress readout for the experimenter (drawn every trial; small
-    # text so it doesn't dominate the black screen)
+    # Progress readout for the experimenter
     progress.text = f"Trial {trial_num + 1} / {N_TRIALS}"
 
-    # 1. Configure the audio schedule and push config to device
-    prep_tone_schedule(stim_n_samples, AUDIO_BUFFER_ADDR)
+    if AUDIO_PATH == 'vpixx':
+        # 1. Configure the audio schedule and push config to device
+        prep_tone_schedule(stim_n_samples, AUDIO_BUFFER_ADDR)
 
-    # 2. Prep visual: trigger patch on + progress text
-    progress.draw()
-    trigger_patch.fillColor = trigger_color(TRIGGER_ON)
-    trigger_patch.draw()
+        # 2. Prep visual: trigger patch on + progress text
+        progress.draw()
+        trigger_patch.fillColor = trigger_color(TRIGGER_ON)
+        trigger_patch.draw()
 
-    # 3. Arm audio + queue register push at next vsync
-    dp.DPxStartAudSched()
-    dp.DPxWriteRegCacheAfterVideoSync()
+        # 3. Arm audio + queue register push at next vsync
+        dp.DPxStartAudSched()
+        dp.DPxWriteRegCacheAfterVideoSync()
 
-    # 4. Flip: MEG trigger edge on DOUT and audio playback both fire
-    #    at this vsync
-    win.flip()
-    hw_onset = dp.DPxGetTime()
+        # 4. Flip: MEG trigger edge on DOUT and audio playback both fire
+        #    at this vsync
+        win.flip()
+        hw_onset = dp.DPxGetTime()
+
+    else:  # AUDIO_PATH == 'psychopy'
+        # 1. Prep visual: trigger patch on + progress text
+        progress.draw()
+        trigger_patch.fillColor = trigger_color(TRIGGER_ON)
+        trigger_patch.draw()
+
+        # 2. Preschedule PTB audio to hit the next vsync. On PTB this
+        #    achieves sub-ms audio precision: PTB knows the target time
+        #    and plans buffer submission around it.
+        when_ptb = win.getFutureFlipTime(clock='ptb')
+        tone_sound.play(when=when_ptb)
+
+        # 3. Flip: MEG trigger edge on DOUT fires at vsync; PTB starts
+        #    audio at (approximately) the same instant.
+        win.flip()
+        hw_onset = dp.DPxGetTime()
 
     # 5. Wait for tone duration (visual trigger stays high across it)
-    tone_dur = stim_n_samples / AUDIO_SAMPLE_RATE
     core.wait(tone_dur)
 
     # 6. Reset trigger to 0 during ISI
@@ -522,7 +666,6 @@ for trial_num in range(N_TRIALS):
     })
 
     # 8. Wait ISI (checking for abort periodically)
-    # Use a slightly interruptible wait so ESC is responsive.
     elapsed = 0.0
     step    = 0.100
     while elapsed < isi:
@@ -553,8 +696,9 @@ win.flip()
 event.waitKeys(keyList=['space', 'escape'])
 
 print(f"\nCompleted {N_TRIALS} trials.")
-print(f"Stimulus: {stim_label}")
-print(f"CSV path: {csv_path}")
+print(f"Audio path: {AUDIO_PATH}")
+print(f"Stimulus  : {stim_label}")
+print(f"CSV path  : {csv_path}")
 print("Now analyze the BBTK file to compute latency = "
       "t_mic - t_pixel_trigger for each pair of events.")
 
