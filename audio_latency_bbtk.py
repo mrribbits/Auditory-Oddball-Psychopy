@@ -224,6 +224,25 @@ ISI_MAX   = 2.200          # seconds
 AUDIO_SAMPLE_RATE = 48000  # Hz for VPIXX audio codec
 AUDIO_AMPLITUDE   = 0.8    # 0-1, scales the peak of the int16 waveform
 
+# --- VPIXX audio output volume ---
+# The VPIXX audio codec has its own output-stage volume control,
+# separate from the waveform amplitude above. It defaults to 0.0 on
+# a freshly-opened device (which produces cleanly-scheduled silent
+# playback with no error -- a very hard silence to debug). Set this
+# to a value that is comfortably audible at the earpiece.
+# Only used when AUDIO_PATH='vpixx'.
+VPIXX_AUDIO_VOLUME = 1.0   # 0.0-1.0
+
+# --- PsychoPy audio output volume ---
+# psychopy.sound.Sound's own output-stage volume control, applied at
+# playback in the PTB backend. Independent of AUDIO_AMPLITUDE (which
+# scales the waveform samples themselves) and of the OS master mixer.
+# Set this so the earpiece SPL is comparable to what VPIXX_AUDIO_VOLUME
+# produces -- both paths should reach the mic at similar loudness for
+# a fair BBTK latency comparison.
+# Only used when AUDIO_PATH='psychopy'.
+PSYCHOPY_AUDIO_VOLUME = 0.25   # 0.0-1.0
+
 # --- 'sine' waveform ---
 SINE_FREQ     = 1000       # Hz
 SINE_DURATION = 0.100      # seconds
@@ -367,11 +386,24 @@ def build_stimulus(tone_type):
 # =============================================================================
 
 def init_vpixx():
-    """Open the VPIXX device, enable Pixel Mode B, and init audio codec."""
+    """Open the VPIXX device, enable Pixel Mode B, and init audio codec.
+
+    Also sets the VPIXX audio output volume, which defaults to 0.0 on
+    a freshly-connected device -- if you skip this, audio schedules
+    play cleanly but silently (with no error), which is a very hard
+    silence to debug.
+    """
     dp.DPxOpen()
     dp.DPxStopAllScheds()
-    dp.DPxEnableDoutPixelModeB()   # blue-channel-only trigger output
+    dp.DPxEnableDoutPixelMode()   # blue-channel-only trigger output
     dp.DPxInitAudCodec()           # initialize audio subsystem
+
+    # VPIXX audio output volume. Range 0.0-1.0. Only used when
+    # AUDIO_PATH='vpixx'; harmless when using PsychoPy audio (the
+    # computer sound card doesn't go through VPIXX).
+    dp.DPxSetAudLeftVolume(VPIXX_AUDIO_VOLUME)
+    dp.DPxSetAudRightVolume(VPIXX_AUDIO_VOLUME)
+
     dp.DPxWriteRegCache()
 
 
@@ -513,7 +545,8 @@ elif AUDIO_PATH == 'psychopy':
     stim_float32 = to_psychopy_float32(stim_wave_norm, AUDIO_AMPLITUDE)
     tone_sound = sound.Sound(value=stim_float32,
                               sampleRate=AUDIO_SAMPLE_RATE,
-                              stereo=False)
+                              stereo=False,
+                              volume=PSYCHOPY_AUDIO_VOLUME)
     _backend_module = type(tone_sound).__module__
     print(f"PsychoPy sound backend: {_backend_module}")
     if 'backend_ptb' not in _backend_module:
@@ -629,6 +662,7 @@ for trial_num in range(N_TRIALS):
         # 4. Flip: MEG trigger edge on DOUT and audio playback both fire
         #    at this vsync
         win.flip()
+        dp.DPxUpdateRegCache()   # refresh so DPxGetTime returns a fresh sample
         hw_onset = dp.DPxGetTime()
 
     else:  # AUDIO_PATH == 'psychopy'
@@ -646,6 +680,7 @@ for trial_num in range(N_TRIALS):
         # 3. Flip: MEG trigger edge on DOUT fires at vsync; PTB starts
         #    audio at (approximately) the same instant.
         win.flip()
+        dp.DPxUpdateRegCache()   # refresh so DPxGetTime returns a fresh sample
         hw_onset = dp.DPxGetTime()
 
     # 5. Wait for tone duration (visual trigger stays high across it)
