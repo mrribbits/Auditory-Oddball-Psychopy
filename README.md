@@ -10,9 +10,6 @@ Based on the FieldTrip cued oddball paradigm (bimanual left/right index-finger r
 - `oddball_active_v2_ft_cued_psychopy_audio.py` — PsychoPy audio + VPIXX ResponsePixx
 - `oddball_active_v2_ft_cued_pyaud_kbd.py` — PsychoPy audio + keyboard (Current Designs)
 
-## Additional scripts
-- `audio latency bbtk.py` - for measuring pneumatic tube latency
-
 ## Requirements
 
 - PsychoPy 2026.1+
