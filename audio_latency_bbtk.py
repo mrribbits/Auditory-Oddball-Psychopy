@@ -106,11 +106,14 @@ Three tone types are available, selectable via TONE_TYPE:
               delays the mic's threshold crossing but is a fair proxy
               for what the paradigm actually plays.
 
-    'click' : 2 ms rectangular pulse with 0.5 ms cosine ramps at
-              edges. Sharpest possible onset -> most accurate onset-
-              time detection at the mic. Broadband spectrum. Best if
-              you want ground-truth acoustic latency of the tubing
-              itself (independent of the specific tone content).
+    'click' : 2 kHz tone burst, 10 ms, 0.5 ms cosine ramps at edges.
+              Sharp onset -> accurate mic-side onset detection at BBTK.
+              The mid-frequency carrier puts the spectral energy where
+              tubes transmit and mics respond well; a rectangular click
+              has DC-heavy spectrum that neither transmits through
+              pneumatic tubing nor gets picked up by small measurement
+              mics. Best if you want ground-truth acoustic latency with
+              minimal ramp-bias contamination.
 
     'noise' : 500 Hz-wide band noise burst centered on 1000 Hz,
               100 ms, 5 ms cosine on/off ramps. Excites the tube's
@@ -213,7 +216,7 @@ AUDIO_PATH = 'vpixx'       # 'vpixx' | 'psychopy'
 
 # --- Stimulus type: pick one ---
 # Read the STIMULUS OPTIONS section of the docstring before choosing.
-TONE_TYPE = 'sine'         # 'sine' | 'click' | 'noise'
+TONE_TYPE = 'click'         # 'sine' | 'click' | 'noise'
 
 # --- Trial structure ---
 N_TRIALS  = 200            # per BBTK measurement session
@@ -222,7 +225,7 @@ ISI_MAX   = 2.200          # seconds
 
 # --- Common audio params ---
 AUDIO_SAMPLE_RATE = 48000  # Hz for VPIXX audio codec
-AUDIO_AMPLITUDE   = 0.8    # 0-1, scales the peak of the int16 waveform
+AUDIO_AMPLITUDE   = 1.0    # 0-1, scales the peak of the int16 waveform
 
 # --- VPIXX audio output volume ---
 # The VPIXX audio codec has its own output-stage volume control,
@@ -241,7 +244,7 @@ VPIXX_AUDIO_VOLUME = 1.0   # 0.0-1.0
 # produces -- both paths should reach the mic at similar loudness for
 # a fair BBTK latency comparison.
 # Only used when AUDIO_PATH='psychopy'.
-PSYCHOPY_AUDIO_VOLUME = 0.25   # 0.0-1.0
+PSYCHOPY_AUDIO_VOLUME = 1.0   # 0.0-1.0
 
 # --- 'sine' waveform ---
 SINE_FREQ     = 1000       # Hz
@@ -249,11 +252,21 @@ SINE_DURATION = 0.100      # seconds
 SINE_RAMP     = 0.005      # seconds cosine on/off
 
 # --- 'click' waveform ---
-# Rectangular pulse with very short cosine ramps on the edges. The
-# 0.5 ms ramps avoid the offset click producing a spurious second
-# BBTK event; the onset ramp is short enough not to noticeably delay
-# the mic's threshold crossing.
-CLICK_DURATION = 0.002     # seconds (2 ms)
+# Short tone burst with sharp cosine on/off ramps. Historically 'click'
+# meant a rectangular pulse -- but pure rectangular pulses concentrate
+# their spectral energy at low frequencies (peak near DC, first null at
+# 1/duration), which pneumatic tubes attenuate heavily and small
+# measurement mics don't transmit well. The result at the earpiece is
+# an inaudibly soft, hard-to-detect click.
+#
+# Modulating the burst by a mid-frequency carrier (2 kHz default) moves
+# the spectral energy into the band where both tubes and mics respond
+# well, without sacrificing the sharp cosine-ramp onset that is the
+# whole point of using 'click' for BBTK latency measurement. Onset
+# ramp is short (~0.5 ms) to minimize threshold-crossing bias; offset
+# ramp prevents a spurious second BBTK event when the burst ends.
+CLICK_FREQ     = 2000      # Hz (carrier frequency of the burst)
+CLICK_DURATION = 0.010     # seconds
 CLICK_RAMP     = 0.0005    # seconds (0.5 ms) cosine on/off
 
 # --- 'noise' waveform ---
@@ -307,16 +320,25 @@ def make_sine(frequency, duration, sample_rate, ramp_duration):
     return wave
 
 
-def make_click(duration, sample_rate, ramp_duration):
-    """Rectangular pulse with short cosine ramps. Returns float64 in [-1, +1].
+def make_click(frequency, duration, sample_rate, ramp_duration):
+    """Short tone burst with cosine on/off ramps. Returns float64 in [-1, +1].
 
-    Onset ramp is intentionally short (~0.5 ms by default) so it does not
-    noticeably delay the mic's threshold crossing at BBTK. The offset
-    ramp prevents a spurious second edge at the tone's end.
+    A brief burst of a mid-frequency sine (typically 2 kHz) with sharp
+    cosine ramps at each edge. This replaces the naive rectangular
+    pulse: rectangular pulses have DC-heavy spectra that pneumatic
+    tubes and small mics don't transmit well, giving inaudibly soft
+    clicks at the earpiece. A carrier-modulated burst puts the energy
+    where the audio path actually responds.
+
+    The onset ramp remains short (~0.5 ms by default) to preserve the
+    sharp attack that makes 'click' the best stimulus for BBTK onset
+    detection. The offset ramp prevents a spurious second edge at the
+    burst's tail.
     """
     n_samples = int(duration * sample_rate)
     n_ramp    = int(ramp_duration * sample_rate)
-    wave = np.ones(n_samples, dtype=np.float64)
+    t = np.linspace(0, duration, n_samples, endpoint=False)
+    wave = np.sin(2.0 * np.pi * frequency * t)
     wave = _apply_cosine_ramps(wave, n_ramp)
     return wave
 
@@ -365,8 +387,9 @@ def build_stimulus(tone_type):
                          SINE_RAMP)
         label = f'sine {SINE_FREQ} Hz, {SINE_DURATION*1000:.0f} ms'
     elif tone_type == 'click':
-        wave = make_click(CLICK_DURATION, AUDIO_SAMPLE_RATE, CLICK_RAMP)
-        label = f'click {CLICK_DURATION*1000:.1f} ms'
+        wave = make_click(CLICK_FREQ, CLICK_DURATION,
+                          AUDIO_SAMPLE_RATE, CLICK_RAMP)
+        label = f'click {CLICK_FREQ} Hz burst, {CLICK_DURATION*1000:.1f} ms'
     elif tone_type == 'noise':
         wave = make_noise_burst(NOISE_CENTER_FREQ, NOISE_BANDWIDTH,
                                 NOISE_DURATION, AUDIO_SAMPLE_RATE,
@@ -395,7 +418,7 @@ def init_vpixx():
     """
     dp.DPxOpen()
     dp.DPxStopAllScheds()
-    dp.DPxEnableDoutPixelMode()   # blue-channel-only trigger output
+    dp.DPxEnableDoutPixelModeB()   # blue-channel-only trigger output
     dp.DPxInitAudCodec()           # initialize audio subsystem
 
     # VPIXX audio output volume. Range 0.0-1.0. Only used when
