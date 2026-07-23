@@ -839,12 +839,6 @@ def run_trial(trial_cfg, block_num, overall_trial, trial_in_block, is_training,
         })
         all_presses_global.append((ev['label'], ev['time']))
 
-    # Check for experimenter abort key (also polled inside
-    # get_keyboard_events, but check here in case a bare event.getKeys
-    # is used elsewhere).
-    if event.getKeys(keyList=['escape']):
-        return {'aborted': True}
-
     # -------------------------------------------------------------------
     # 1. Fixation (1500 ms)  --  no trigger
     # -------------------------------------------------------------------
@@ -975,15 +969,36 @@ def run_trial(trial_cfg, block_num, overall_trial, trial_in_block, is_training,
             core.wait(isi_after)
 
     # -------------------------------------------------------------------
-    # 4. Response window (1000 ms of fixation)  --  no trigger
+    # 4. Response window (~1000 ms of fixation)  --  no trigger
     # -------------------------------------------------------------------
+    # We use a flip-based loop rather than core.wait so that Windows'
+    # message queue keeps getting pumped. Some PsychoPy keyboard
+    # backends on Windows only notice key presses when win.flip() runs
+    # -- if we sleep instead, key events during the response window are
+    # silently dropped. Actively drain kb inside the loop to collect
+    # presses as they arrive.
     el_tracker.sendMessage('response_window_onset')
-    core.wait(RESPONSE_WINDOW)
+    trial_events = []
+    resp_clock = core.Clock()
+    while resp_clock.getTime() < RESPONSE_WINDOW:
+        fixation.draw()
+        trigger_patch.fillColor = trigger_color(TRIGGER_RESET)
+        trigger_patch.draw()
+        win.flip()
+        events_this_frame, abort_key = get_keyboard_events(kb, KEY_CODES)
+        if abort_key:
+            return {'aborted': True}
+        trial_events.extend(events_this_frame)
+
+    # Final drain to catch anything that arrived after the last flip
+    late_events, abort_key = get_keyboard_events(kb, KEY_CODES)
+    if abort_key:
+        return {'aborted': True}
+    trial_events.extend(late_events)
 
     # -------------------------------------------------------------------
-    # 5. Drain the keyboard buffer and classify this trial's response
+    # 5. Classify this trial's response
     # -------------------------------------------------------------------
-    trial_events, abort_key = get_keyboard_events(kb, KEY_CODES)
 
     # Log every event to the raw presses CSV
     for ev in trial_events:

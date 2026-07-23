@@ -359,7 +359,10 @@ DISPLAY_FRAME_MS = 8.33         # 120 Hz refresh; use 16.67 for 60 Hz
 #     '8': 'right_ring',
 #     '9': 'right_pinky',
 # }
-KEY_CODES = {}
+KEY_CODES = {
+    '1': 'left_index',
+    '2': 'right_index',
+}
 
 # Which button (finger label) is the correct response for each cue direction:
 EXPECTED_BUTTONS = {'left': 'left_index', 'right': 'right_index'}
@@ -687,13 +690,34 @@ def do_drift_check_between_blocks(el_tracker, scn_width, scn_height,
 # =============================================================================
 
 def write_trials_csv(filename, rows):
-    """Write the trial-level CSV (cumulative, overwritten each flush)."""
+    """Write the trial-level CSV (cumulative, overwritten each flush).
+
+    Timestamp columns are named with a clock-provenance suffix:
+        *_pp        -- PsychoPy default clock (behavioral RT reference)
+        *_vp        -- VPIXX DATAPixx3 hardware clock (MEG alignment)
+        *_vp_est    -- Estimated VPIXX-clock timestamp for events that
+                       VPIXX did NOT directly detect (e.g. keyboard
+                       responses arrive via the OS HID pipeline, not
+                       through VPIXX). Computed by converting the
+                       PsychoPy-clock event time using the PP<->VP
+                       correspondence sampled at each response-window
+                       flip. Accurate to within ~one video frame.
+                       Definitive response timestamps for MEG analysis
+                       should come from the button box's TTL wiring
+                       into the MEG amplifier trigger channel, not
+                       from this estimated column.
+    """
     fields = ['overall_trial', 'block', 'trial_in_block', 'is_training',
               'cue_hand', 'expected_button', 'n_standards',
-              'fixation_onset', 'cue_onset', 'cue_hw_onset',
-              'first_tone_hw_onset', 'deviant_hw_onset', 'deviant_pp_onset',
-              'response_button', 'response_key_name', 'response_time', 'rt',
-              'outcome', 'feedback_shown', 'blink_onset']
+              'fixation_onset_pp', 'fixation_onset_vp',
+              'cue_onset_pp', 'cue_onset_vp',
+              'first_tone_onset_pp', 'first_tone_onset_vp',
+              'deviant_onset_pp', 'deviant_onset_vp',
+              'response_button', 'response_key_name',
+              'response_time_pp', 'response_time_vp_est',
+              'rt_pp', 'rt_vp_est',
+              'outcome', 'feedback_shown',
+              'blink_onset_pp', 'blink_onset_vp']
     with open(filename, 'w', newline='') as f:
         w = csv.DictWriter(f, fieldnames=fields, extrasaction='ignore')
         w.writeheader()
@@ -704,14 +728,13 @@ def write_tones_csv(filename, rows):
     """Write the per-tone CSV (cumulative, overwritten each flush).
 
     Columns:
-        overall_trial, block, trial_in_block, tone_index, kind,
-        frequency      - Hz
-        psychopy_onset - default PsychoPy clock, from win.flip()
-        hw_onset       - VPIXX hardware clock, from DPxGetTime()
-        isi_after      - seconds until the next tone
+        overall_trial, block, trial_in_block, tone_index, kind, frequency
+        onset_pp    - PsychoPy clock, from win.flip()
+        onset_vp    - VPIXX hardware clock, from DPxGetTime()
+        isi_after   - seconds until the next tone
     """
     fields = ['overall_trial', 'block', 'trial_in_block', 'tone_index',
-              'kind', 'frequency', 'psychopy_onset', 'hw_onset',
+              'kind', 'frequency', 'onset_pp', 'onset_vp',
               'isi_after']
     with open(filename, 'w', newline='') as f:
         w = csv.DictWriter(f, fieldnames=fields, extrasaction='ignore')
@@ -722,12 +745,19 @@ def write_tones_csv(filename, rows):
 def write_presses_csv(filename, rows):
     """Write the raw keyboard-event CSV (cumulative, overwritten each flush).
 
-    Note: `time` is the PsychoPy-clock timestamp of the key-down event,
-    not a VPIXX hardware timestamp. For MEG alignment of responses,
-    use the button box's TTL trigger channel in the MEG data instead.
+    Timestamps:
+        time_pp     - PsychoPy-clock timestamp of the key-down event.
+        time_vp_est - Estimated VPIXX-clock timestamp of the same event.
+                      VPIXX does NOT directly detect keyboard input;
+                      this column is derived by converting time_pp
+                      using the PP<->VP correspondence sampled at each
+                      response-window flip. Accurate to within ~one
+                      video frame. For definitive response timing in
+                      MEG analysis, use the button box's TTL trigger
+                      channel in the MEG data instead.
     """
     fields = ['context', 'overall_trial', 'block', 'kind', 'label',
-              'key_name', 'time']
+              'key_name', 'time_pp', 'time_vp_est']
     with open(filename, 'w', newline='') as f:
         w = csv.DictWriter(f, fieldnames=fields, extrasaction='ignore')
         w.writeheader()
@@ -805,7 +835,15 @@ def run_trial(trial_cfg, block_num, overall_trial, trial_in_block, is_training,
     if abort_key:
         return {'aborted': True}
 
+    # Anchor a VP timestamp for these inter-trial events. Since they
+    # came in between flips, we only have an approximate PP<->VP
+    # correspondence; use the current DPxGetTime and core.getTime().
+    if inter_events:
+        dp.DPxUpdateRegCache()
+        anchor_vp = dp.DPxGetTime()
+        anchor_pp = core.getTime()
     for ev in inter_events:
+        ev['time_vp_est'] = anchor_vp + (ev['time'] - anchor_pp)
         presses_log.append({
             'context':       'inter_trial',
             'overall_trial': overall_trial,
@@ -813,15 +851,10 @@ def run_trial(trial_cfg, block_num, overall_trial, trial_in_block, is_training,
             'kind':          ev['kind'],
             'label':         ev['label'],
             'key_name':      ev['key_name'],
-            'time':          f"{ev['time']:.6f}",
+            'time_pp':       f"{ev['time']:.6f}",
+            'time_vp_est':       f"{ev['time_vp_est']:.6f}",
         })
         all_presses_global.append((ev['label'], ev['time']))
-
-    # Check for experimenter abort key (also polled inside
-    # get_keyboard_events, but check here in case a bare event.getKeys
-    # is used elsewhere).
-    if event.getKeys(keyList=['escape']):
-        return {'aborted': True}
 
     # -------------------------------------------------------------------
     # 1. Fixation (1500 ms)  --  no trigger
@@ -829,7 +862,9 @@ def run_trial(trial_cfg, block_num, overall_trial, trial_in_block, is_training,
     fixation.draw()
     trigger_patch.fillColor = trigger_color(TRIGGER_RESET)
     trigger_patch.draw()
-    fixation_onset = win.flip()
+    fixation_onset_pp = win.flip()
+    dp.DPxUpdateRegCache()
+    fixation_onset_vp = dp.DPxGetTime()
     el_tracker.sendMessage(f'TRIALID {overall_trial}')
     el_tracker.sendMessage('fixation_onset')
 
@@ -849,8 +884,9 @@ def run_trial(trial_cfg, block_num, overall_trial, trial_in_block, is_training,
 
     el_msg = f'cue_onset_{cue_hand}'
     win.callOnFlip(el_tracker.sendMessage, el_msg)
-    cue_onset    = win.flip()
-    cue_hw_onset = dp.DPxGetTime()
+    cue_onset_pp = win.flip()
+    dp.DPxUpdateRegCache()
+    cue_onset_vp = dp.DPxGetTime()
 
     core.wait(CUE_DURATION)
 
@@ -866,9 +902,10 @@ def run_trial(trial_cfg, block_num, overall_trial, trial_in_block, is_training,
     n_std = trial_cfg['n_standards']
     isis  = trial_cfg['isis']
 
-    first_tone_hw_onset = None
-    deviant_hw_onset    = None
-    deviant_pp_onset    = None   # PsychoPy clock; used for RT calc
+    first_tone_onset_pp = None
+    first_tone_onset_vp = None
+    deviant_onset_pp    = None   # PsychoPy clock; used for RT calc
+    deviant_onset_vp    = None
 
     for tone_index in range(n_std + 1):
         is_deviant = (tone_index == n_std)
@@ -899,15 +936,17 @@ def run_trial(trial_cfg, block_num, overall_trial, trial_in_block, is_training,
         #   - VPIXX puts trigger byte on DOUT (MEG trigger edge)
         #   - Queued register push executes -> audio playback begins
         # Both events are aligned to the same vsync in hardware.
-        tone_onset    = win.flip()
-        tone_hw_onset = dp.DPxGetTime()
+        tone_onset_pp = win.flip()
+        dp.DPxUpdateRegCache()   # refresh so DPxGetTime returns a fresh sample
+        tone_onset_vp = dp.DPxGetTime()
 
         # Record positions for RT / CSV / summary
         if tone_index == 0:
-            first_tone_hw_onset = tone_hw_onset
+            first_tone_onset_pp = tone_onset_pp
+            first_tone_onset_vp = tone_onset_vp
         if is_deviant:
-            deviant_hw_onset = tone_hw_onset
-            deviant_pp_onset = tone_onset   # PsychoPy clock, for RT
+            deviant_onset_pp = tone_onset_pp
+            deviant_onset_vp = tone_onset_vp
 
         # Tone duration (visual trigger stays high across the tone)
         core.wait(TONE_DURATION)
@@ -921,8 +960,8 @@ def run_trial(trial_cfg, block_num, overall_trial, trial_in_block, is_training,
             'tone_index':     tone_index + 1,
             'kind':           kind,
             'frequency':      DEVIANT_FREQ if is_deviant else STANDARD_FREQ,
-            'psychopy_onset': f"{tone_onset:.6f}",
-            'hw_onset':       f"{tone_hw_onset:.6f}",
+            'onset_pp':       f"{tone_onset_pp:.6f}",
+            'onset_vp':       f"{tone_onset_vp:.6f}",
             'isi_after':      f"{isi_after:.4f}" if isi_after else '',
         })
 
@@ -937,15 +976,51 @@ def run_trial(trial_cfg, block_num, overall_trial, trial_in_block, is_training,
             core.wait(isi_after)
 
     # -------------------------------------------------------------------
-    # 4. Response window (1000 ms of fixation)  --  no trigger
+    # 4. Response window (~1000 ms of fixation)  --  no trigger
     # -------------------------------------------------------------------
+    # We use a flip-based loop rather than core.wait so that Windows'
+    # message queue keeps getting pumped. Some PsychoPy keyboard
+    # backends on Windows only notice key presses when win.flip() runs
+    # -- if we sleep instead, key events during the response window are
+    # silently dropped. Actively drain kb inside the loop to collect
+    # presses as they arrive.
+    #
+    # Each frame we also record the VPIXX hardware clock time so that
+    # any key events captured that frame can be tagged with an
+    # approximate VP timestamp (within one frame of the true press).
     el_tracker.sendMessage('response_window_onset')
-    core.wait(RESPONSE_WINDOW)
+    trial_events = []
+    resp_clock = core.Clock()
+    while resp_clock.getTime() < RESPONSE_WINDOW:
+        fixation.draw()
+        trigger_patch.fillColor = trigger_color(TRIGGER_RESET)
+        trigger_patch.draw()
+        frame_pp = win.flip()
+        dp.DPxUpdateRegCache()
+        frame_vp = dp.DPxGetTime()
+        events_this_frame, abort_key = get_keyboard_events(kb, KEY_CODES)
+        if abort_key:
+            return {'aborted': True}
+        for ev in events_this_frame:
+            # Approximate VP time = VP clock at this frame's flip, offset
+            # by (event_pp - frame_pp) so PP-to-VP delta is preserved.
+            ev['time_vp_est'] = frame_vp + (ev['time'] - frame_pp)
+        trial_events.extend(events_this_frame)
+
+    # Final drain to catch anything that arrived after the last flip.
+    dp.DPxUpdateRegCache()
+    final_vp = dp.DPxGetTime()
+    final_pp = core.getTime()
+    late_events, abort_key = get_keyboard_events(kb, KEY_CODES)
+    if abort_key:
+        return {'aborted': True}
+    for ev in late_events:
+        ev['time_vp_est'] = final_vp + (ev['time'] - final_pp)
+    trial_events.extend(late_events)
 
     # -------------------------------------------------------------------
-    # 5. Drain the keyboard buffer and classify this trial's response
+    # 5. Classify this trial's response
     # -------------------------------------------------------------------
-    trial_events, abort_key = get_keyboard_events(kb, KEY_CODES)
 
     # Log every event to the raw presses CSV
     for ev in trial_events:
@@ -956,7 +1031,8 @@ def run_trial(trial_cfg, block_num, overall_trial, trial_in_block, is_training,
             'kind':          ev['kind'],
             'label':         ev['label'],
             'key_name':      ev['key_name'],
-            'time':          f"{ev['time']:.6f}",
+            'time_pp':       f"{ev['time']:.6f}",
+            'time_vp_est':       f"{ev['time_vp_est']:.6f}",
         })
         all_presses_global.append((ev['label'], ev['time']))
 
@@ -966,13 +1042,27 @@ def run_trial(trial_cfg, block_num, overall_trial, trial_in_block, is_training,
 
     # Classify: find the first VALID press in the response window.
     # All times here are in the PsychoPy default clock.
-    resp_min_pp = deviant_pp_onset + RESP_WIN_MIN
-    resp_max_pp = deviant_pp_onset + RESP_WIN_MAX
+    resp_min_pp = deviant_onset_pp + RESP_WIN_MIN
+    resp_max_pp = deviant_onset_pp + RESP_WIN_MAX
+
+    # TEMPORARY DEBUG - remove after diagnosing
+    print(f"\n--- Trial {overall_trial}, cue={cue_hand} ---")
+    print(f"  deviant_onset_pp = {deviant_onset_pp:.3f}")
+    print(f"  scoring window   = [{resp_min_pp:.3f}, {resp_max_pp:.3f}]")
+    print(f"  events received  = {len(trial_events)}")
+    for ev in trial_events:
+        dt = ev['time'] - deviant_onset_pp
+        in_window = resp_min_pp <= ev['time'] <= resp_max_pp
+        print(f"    key={ev['key_name']!r}  label={ev['label']}  "
+              f"time={ev['time']:.3f}  dt_from_deviant={dt:+.3f}s  "
+              f"in_window={in_window}")
 
     response_button   = None
     response_key_name = None
-    response_time     = None
-    rt                = float('nan')
+    response_time_pp  = None
+    response_time_vp_est  = None
+    rt_pp             = float('nan')
+    rt_vp_est             = float('nan')
     outcome           = 'miss'
 
     for ev in trial_events:
@@ -981,8 +1071,14 @@ def run_trial(trial_cfg, block_num, overall_trial, trial_in_block, is_training,
         if resp_min_pp <= ev['time'] <= resp_max_pp:
             response_button   = ev['label']
             response_key_name = ev['key_name']
-            response_time     = ev['time']
-            rt = response_time - deviant_pp_onset
+            response_time_pp  = ev['time']
+            response_time_vp_est  = ev['time_vp_est']
+            rt_pp = response_time_pp - deviant_onset_pp
+            # rt_vp_est uses the estimated response VP time; deviant_onset_vp
+            # is a real VPIXX-captured value, but the response side is
+            # keyboard-derived so the difference inherits ~one-frame
+            # jitter from the response estimate.
+            rt_vp_est = response_time_vp_est - deviant_onset_vp
             expected = EXPECTED_BUTTONS[cue_hand]
             outcome = 'correct' if response_button == expected else 'wrong_button'
             break   # first in-window press defines the response
@@ -1019,7 +1115,9 @@ def run_trial(trial_cfg, block_num, overall_trial, trial_in_block, is_training,
     trigger_patch.fillColor = trigger_color(TRIGGER_BLINK)
     trigger_patch.draw()
     win.callOnFlip(el_tracker.sendMessage, 'blink_cue')
-    blink_onset = win.flip()
+    blink_onset_pp = win.flip()
+    dp.DPxUpdateRegCache()
+    blink_onset_vp = dp.DPxGetTime()
 
     core.wait(BLINK_DURATION)
 
@@ -1041,19 +1139,24 @@ def run_trial(trial_cfg, block_num, overall_trial, trial_in_block, is_training,
         'cue_hand':            cue_hand,
         'expected_button':     EXPECTED_BUTTONS[cue_hand],
         'n_standards':         n_std,
-        'fixation_onset':      f"{fixation_onset:.6f}",
-        'cue_onset':           f"{cue_onset:.6f}",
-        'cue_hw_onset':        f"{cue_hw_onset:.6f}",
-        'first_tone_hw_onset': f"{first_tone_hw_onset:.6f}",
-        'deviant_hw_onset':    f"{deviant_hw_onset:.6f}",
-        'deviant_pp_onset':    f"{deviant_pp_onset:.6f}",
+        'fixation_onset_pp':   f"{fixation_onset_pp:.6f}",
+        'fixation_onset_vp':   f"{fixation_onset_vp:.6f}",
+        'cue_onset_pp':        f"{cue_onset_pp:.6f}",
+        'cue_onset_vp':        f"{cue_onset_vp:.6f}",
+        'first_tone_onset_pp': f"{first_tone_onset_pp:.6f}",
+        'first_tone_onset_vp': f"{first_tone_onset_vp:.6f}",
+        'deviant_onset_pp':    f"{deviant_onset_pp:.6f}",
+        'deviant_onset_vp':    f"{deviant_onset_vp:.6f}",
         'response_button':     response_button if response_button else '',
         'response_key_name':   response_key_name if response_key_name else '',
-        'response_time':       f"{response_time:.6f}" if response_time is not None else '',
-        'rt':                  f"{rt:.4f}" if not np.isnan(rt) else '',
+        'response_time_pp':    f"{response_time_pp:.6f}" if response_time_pp is not None else '',
+        'response_time_vp_est':    f"{response_time_vp_est:.6f}" if response_time_vp_est is not None else '',
+        'rt_pp':               f"{rt_pp:.4f}" if not np.isnan(rt_pp) else '',
+        'rt_vp_est':               f"{rt_vp_est:.4f}" if not np.isnan(rt_vp_est) else '',
         'outcome':             outcome,
         'feedback_shown':      feedback_shown,
-        'blink_onset':         f"{blink_onset:.6f}",
+        'blink_onset_pp':      f"{blink_onset_pp:.6f}",
+        'blink_onset_vp':      f"{blink_onset_vp:.6f}",
     }
     return result
 
@@ -1526,7 +1629,12 @@ el_tracker.sendMessage('EXPERIMENT_END')
 
 # One last drain of the keyboard buffer in case of trailing presses
 _end_events, _ = get_keyboard_events(kb, KEY_CODES)
+if _end_events:
+    dp.DPxUpdateRegCache()
+    _end_anchor_vp = dp.DPxGetTime()
+    _end_anchor_pp = core.getTime()
 for ev in _end_events:
+    ev_vp_est = _end_anchor_vp + (ev['time'] - _end_anchor_pp)
     presses_log.append({
         'context':       'end',
         'overall_trial': overall_trial,
@@ -1534,7 +1642,8 @@ for ev in _end_events:
         'kind':          ev['kind'],
         'label':         ev['label'],
         'key_name':      ev['key_name'],
-        'time':          f"{ev['time']:.6f}",
+        'time_pp':       f"{ev['time']:.6f}",
+        'time_vp_est':       f"{ev_vp_est:.6f}",
     })
 
 # Final flush
@@ -1559,8 +1668,8 @@ n_wrong     = sum(1 for t in main_trials if t['outcome'] == 'wrong_button')
 n_miss      = sum(1 for t in main_trials if t['outcome'] == 'miss')
 
 pct_correct = 100.0 * n_correct / n_main if n_main > 0 else 0.0
-correct_rts = [float(t['rt']) for t in main_trials
-               if t['outcome'] == 'correct' and t['rt'] != '']
+correct_rts = [float(t['rt_pp']) for t in main_trials
+               if t['outcome'] == 'correct' and t['rt_pp'] != '']
 mean_rt = np.mean(correct_rts) if correct_rts else float('nan')
 
 summary_lines = [
