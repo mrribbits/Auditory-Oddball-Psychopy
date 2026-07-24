@@ -3,10 +3,13 @@
 PsychoPy script for active auditory oddball paradigm in the Scully OPM-MEG facility. 
 Based on the FieldTrip cued oddball paradigm:
 https://www.fieldtriptoolbox.org/workshop/natmeg2014/meg_audodd/
+
 Includes bimanual left/right index-finger responses, 3 blocks × 100 trials, 
 continuous EyeLink recording, VPIXX pixel-mode triggers, VPIXX audio delivery.
 
-- `oddball_active_cued_ft_VPIXXaudio_KBDinput.py` — VPIXX audio + keyboard input
+`oddball_active_cued_ft_VPIXXaudio_KBDinput.py` — main script
+`EyeLinkCoreGraphicsPsychoPy.py` — required for Eyelink
+`*.wav` — optional sound files for Eyelink
 
 ## Software Requirements
 
@@ -17,9 +20,4 @@ continuous EyeLink recording, VPIXX pixel-mode triggers, VPIXX audio delivery.
 ## Hardware Requirements
 - VPixx DATAPixx3, SOUNDPixx, PROPixx
 - SR Eyelink
-
-## Eyelink and VPIXX dummy modes built-in
-
-## Data handling
-
-The `results/` folder is gitignored.
+- Eyelink and VPIXX dummy mode options are available.
