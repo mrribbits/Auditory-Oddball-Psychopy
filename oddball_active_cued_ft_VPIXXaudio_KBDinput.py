@@ -1,43 +1,25 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Active Auditory Oddball, FieldTrip Cued Paradigm - v2
+Active Auditory Oddball, FieldTrip Cued Paradigm
 (VPIXX audio + keyboard responses)
 ========================================================================
 
 OVERVIEW
 --------
-Bimanual cued active oddball for OPM-MEG. Replicates the FieldTrip
-tutorial paradigm (Oostenveld et al.) as documented in their oddball
-workshop figure. Each trial cues the subject to prepare a left- or
-right-hand response, presents 3-7 standard tones followed by 1 deviant
-tone, and requires a button press with the cued index finger. This
-supports classical MMN/P3 analysis on tone-locked ERFs AND lateralized
-post-movement beta rebound (PMBR) analysis on the cued hand contrast.
+Bimanual cued active oddball. Replicates the FieldTrip tutorial
+paradigm (Oostenveld et al.), documented at
+www.fieldtriptoolbox.org/workshop/natmeg2014/meg_audodd/.
+Each trial cues the subject to prepare a left- or right-hand response,
+presents 3-7 standard tones followed by 1 deviant tone, and requires a
+button press with the cued index finger. Supports classical MMN/P3
+analysis on tone-locked ERFs and lateralized post-movement beta rebound
+(PMBR) analysis on the cued-hand contrast.
 
-This variant uses VPIXX audio output AND keyboard input. Audio is
-hardware-scheduled by the DATAPixx3 and vsync-locked to the trigger
-pixel, so audio and MEG trigger onset are aligned in hardware. Responses
-are captured via a Current Designs (or similar) button box that presents
-itself to the OS as a HID keyboard rather than through the VPIXX DIN
-port. Everything else -- pixel-mode triggers, EyeLink recording and
-drift checks, block structure, CSV outputs -- is byte-for-byte identical
-to the sibling scripts.
-
-Related scripts:
-    oddball_active_v2_ft_cued.py                VPIXX audio + VPIXX buttons
-    oddball_active_v2_ft_cued_psychopy_audio.py PsychoPy audio + VPIXX buttons
-    oddball_active_v2_ft_cued_pyaud_kbd.py      PsychoPy audio + keyboard
-    THIS FILE                                   VPIXX audio + keyboard
-
-Timing note for keyboard input:
-    Response times are recorded in the PsychoPy clock (same clock as
-    win.flip() return values). This is behavioral RT and is used for
-    trial scoring in the CSV. Definitive response timing for MEG
-    analysis should come from the button box's direct TTL wiring into
-    the amplifier trigger channel, NOT from the software-recorded
-    keyboard event -- the OS HID pipeline adds a few ms of jitter
-    that does not affect behavior but matters for tight MEG locking.
+Audio is hardware-scheduled by the DATAPixx3 and vsync-locked to the
+MEG trigger pixel. Responses come from a Current Designs button box
+that presents itself as an HID keyboard. Eye tracking runs on the
+EyeLink Host PC throughout.
 
 Structure (one trial = one cycle of the figure):
 
@@ -49,25 +31,24 @@ Structure (one trial = one cycle of the figure):
     |           | <+< |                 |         |          |       |
     +-----------+-----+-----------------+---------+----------+-------+
 
-Three blocks x 100 trials = 300 trials total, ~51 minutes recording
+Three blocks x 100 trials = 300 trials total, ~51 minutes recording,
 plus a ~3-minute training block at the start.
 
 
 AUDIO STIMULI VIA VPIXX AUDIO SUBSYSTEM
 ---------------------------------------
-Both tones are generated as int16 arrays at experiment start and loaded
-into DATAPixx3 RAM (one tone per buffer address). Audio onset is
-hardware-locked to the video vsync via DPxWriteRegCacheAfterVideoSync:
-the same vsync signal that triggers VPIXX to read the trigger pixel
-from the framebuffer and put it on DOUT (the MEG trigger edge) also
-triggers the audio-schedule start bit to be pushed to the device.
+Tones are generated as int16 arrays at experiment start and loaded
+into DATAPixx3 RAM. Audio onset is hardware-locked to the video vsync
+via DPxWriteRegCacheAfterVideoSync: the same vsync that triggers VPIXX
+to read the trigger pixel and put it on DOUT (MEG trigger edge) also
+pushes the audio-schedule start bit to the device.
 
 Per-tone sequence:
 
     1. prep_tone_schedule(kind)
-       Configure the audio schedule (DPxSetAudioSchedule) and push
-       the config to the device (DPxWriteRegCache). Config now
-       resident on device; start bit NOT yet set.
+       Configure the schedule (DPxSetAudioSchedule) and push it to
+       the device (DPxWriteRegCache). Config resident; start bit
+       NOT yet armed.
 
     2. Draw the visual frame (fixation + trigger pixel).
 
@@ -76,27 +57,18 @@ Per-tone sequence:
          DPxWriteRegCacheAfterVideoSync    queue push at next vsync
 
     4. win.flip()
-       Blocks until the same next vsync. At that vsync:
-         - Display buffer swap begins (frame starts drawing from top;
-           the trigger pixel is NOT yet illuminated to the eye)
+       Blocks until that vsync. At that vsync:
          - VPIXX reads the trigger pixel color from the framebuffer
            and puts it on DOUT -> MEG trigger channel edge rises
          - Queued register push executes -> audio playback begins
 
     5. DPxGetTime -> capture the hardware timestamp of the vsync.
 
-Audio playback and the MEG trigger channel edge both fire at the same
-vsync with no software offset between them. The visible trigger pixel
-lags by one frame (see TRIGGER vs. PERCEIVED-STIMULUS TIMING below),
-but that does not matter here because (a) the trigger pixel is not a
-stimulus the subject reacts to and (b) DOUT is read from the
-framebuffer at vsync, not from the illuminated display.
-
-The only remaining delay in the auditory pathway is the physical
-tube-to-ear transit through the OPM headphone system - a constant
-acoustic latency that needs to be measured once with a microphone at
-the earpiece and subtracted from MMN peak latencies in analysis.
-That measurement is a property of the audio path, not the software.
+Audio playback and MEG trigger edge fire at the same vsync with no
+software offset between them. The only remaining delay in the auditory
+pathway is the physical transit through the OPM headphone tubes (or
+loudspeaker-to-ear) - a constant acoustic latency to measure once with
+a microphone and subtract from MMN peak latencies in analysis.
 
 IMPORTANT INVARIANT: between prep_tone_schedule and the DPxStartAudSched
 + DPxWriteRegCacheAfterVideoSync pair, no other code may call
@@ -108,19 +80,15 @@ TRIGGER SCHEME (VPIXX Pixel Mode B, blue channel only)
 ------------------------------------------------------
 Sent by drawing a 1x1 patch in the upper-left corner:
 
-    standard tone onset:   1
-    deviant tone onset:    2
-    blink cue onset:       4
-    left cue onset:        8
-    right cue onset:      16
-    error feedback onset: 32
+    standard tone onset:   1   (Trigger 1)
+    deviant tone onset:    2   (Trigger 2)
+    blink cue onset:       4   (Trigger 3)
+    left cue onset:        8   (Trigger 4)
+    right cue onset:      16   (Trigger 5)
+    error feedback onset: 32   (Trigger 6)
     (reset between events: 0)
 
-Response events are NOT pixel-triggered. The button box's TTL output
-should be wired directly into the OPM-MEG amplifier's trigger channels
-so button-press onsets are recorded in the MEG data stream with no
-software intervention; the software-side keyboard timestamps in this
-script are behavioral only.
+Response events are not pixel-triggered; see KEYBOARD INPUT below.
 
 
 TRIGGER vs. PERCEIVED-STIMULUS TIMING
@@ -128,66 +96,44 @@ TRIGGER vs. PERCEIVED-STIMULUS TIMING
 All pixel-mode triggers fire at the vsync when win.flip() unblocks.
 That vsync marks when the display BEGINS drawing the new frame from
 the top; the pixels the subject actually sees are illuminated one
-frame later (~8.33 ms at 120 Hz; ~16.7 ms at 60 Hz). The trigger
-therefore LEADS the perceived visual stimulus by one frame.
-
-For the AUDIO channel, playback starts at the same vsync as the MEG
-trigger edge (VPIXX schedule is vsync-locked). The only remaining
-delay is the physical tube-to-ear transit through the OPM headphone
-system - a constant acoustic latency to measure once with a microphone
-at the earpiece and subtract from MMN peak latencies in analysis.
-
-For VISUAL cues (cue arrow, error feedback, BLINK text) the trigger
-leads perceived onset by one frame. When locking MEG/OPM analyses to
-the moment the subject actually saw the stimulus (e.g. cue-locked
-motor preparation, feedback-locked ERPs), subtract DISPLAY_FRAME_MS
+frame later (~8.33 ms at 120 Hz). The trigger therefore LEADS the
+perceived visual stimulus by one frame. When locking analyses to the
+moment the subject actually saw the stimulus, subtract DISPLAY_FRAME_MS
 from the trigger-channel edge time.
 
     Event                   MEG trigger edge -> subject perceives
     -----------------------  --------------------------------------
-    Standard / deviant tone  + tube_delay (measure on setup)
+    Standard / deviant tone  + transit_delay (measure on setup)
     Cue arrow                + one video frame (DISPLAY_FRAME_MS)
     BLINK text               + one video frame
     Error feedback           + one video frame
 
-Button presses in this variant come from a HID-keyboard button box.
-For definitive MEG event timing, wire the box's TTL trigger output
-directly to the amplifier trigger channel; the software-recorded
-keyboard timestamps are behavioral only.
-
 
 KEYBOARD INPUT
 --------------
-The subject's button box emits standard USB HID keyboard events (as
-Current Designs boxes typically do). The script uses
-psychopy.hardware.keyboard.Keyboard for polling. Response times are
-in the PsychoPy default clock, same clock as win.flip() return
-values, so RTs can be computed as `response_time - deviant_pp_onset`.
+The button box emits standard USB HID keyboard events. Polling is via
+psychopy.hardware.keyboard.Keyboard. Response times are in the
+PsychoPy default clock, so RTs are computed as
+`response_time_pp - deviant_onset_pp`.
 
-Populate KEY_CODES (in the parameters section below) with the mapping
-between key names (as emitted by your button box) and finger labels.
-Common Current Designs default outputs are digits '1'-'9' or letters
-'a'-'z'; check your box's config utility.
-
-The script validates KEY_CODES at startup: if it does not contain
-entries for at least 'left_index' and 'right_index' (the two responses
-this task actually needs) the script exits with an error message. Fill
-in more finger positions if you want wrong-hand or wrong-finger
-presses to be distinguished from unknown keys in the CSV, but only
-'left_index' and 'right_index' are required for correct scoring.
+Populate KEY_CODES (in the parameters section) with the mapping from
+key names (as emitted by the button box) to finger labels. Common
+Current Designs default outputs are digits '1'-'9' or letters 'a'-'z';
+check the box's config utility. The script validates KEY_CODES at
+startup and exits if 'left_index' and 'right_index' are not both
+defined; other finger positions are optional.
 
 Definitive response timing for MEG analysis should be read from the
 button box's TTL trigger channel in the MEG data, not from these
-keyboard timestamps. The keyboard timestamps go through the OS HID
-pipeline and carry a few ms of jitter that is fine for behavior but
-not for MEG-locked analyses.
+keyboard timestamps: the OS HID pipeline carries a few ms of jitter
+that is fine for behavior but not for tight MEG locking.
 
 
 RESPONSE SCORING
 ----------------
 Valid response window: 150-1400 ms after deviant onset (150 ms floor
 rejects anticipation; 1400 ms ceiling = deviant duration + response
-phase, matching the figure).
+phase, matching the FieldTrip task).
 
 Outcomes:
     correct       : cued hand's index finger, pressed in window
@@ -212,8 +158,6 @@ BLOCK STRUCTURE
 
 CSV logs are flushed at the end of every block (crash-safe: if the
 experiment dies during block 2, block 1 data is on disk).
-DIN log runs continuously across the whole session; between-block
-breaks do not stop or restart it.
 
 
 OUTPUT FILES
@@ -221,7 +165,7 @@ OUTPUT FILES
 results/sub-<p>_ses-<s>_task-oddballftcued/
 
     ..._trials.csv    one row per trial (main behavioral log)
-    ..._tones.csv     one row per tone (per-tone hw timestamps)
+    ..._tones.csv     one row per tone (per-tone vpixx timestamps)
     ..._presses.csv   one row per detected button-box event
     ....EDF           EyeLink data (from Host PC at experiment end)
 
@@ -229,21 +173,16 @@ results/sub-<p>_ses-<s>_task-oddballftcued/
 PRE-FLIGHT CHECKLIST
 --------------------
     1. VPIXX device is on and reachable (DPxOpen succeeds).
-    2. VPIXX is running Pixel Mode B (this script enables it, but
-       verify PyPixx doesn't override).
-    3. VPIXX audio out is wired to the OPM amplifier / earpiece path
-       and VPIXX_AUDIO_VOLUME is audible (defaults to 0.5; VPIXX volume
-       defaults to 0.0 on a fresh device connection).
-    4. Button box is plugged in and reporting keyboard events. Open
-       any text field, press each button, note what key each finger
-       emits, and fill in KEY_CODES accordingly.
-    5. Button box TTL trigger output is wired into the MEG amplifier
-       trigger channel (for hardware-precise response timing in the
-       MEG data; keyboard timestamps are behavioral only).
+    2. VPIXX is running Pixel Mode B (this script enables it).
+    3. Audio set to desired path (headphones or loudspeakers) and
+       volume sufficient.
+    4. Button box is reporting keyboard events. Open any text field,
+       press each button, note what key each finger emits, and fill
+       in KEY_CODES accordingly.
+    5. Button box TTL trigger output is wired into the MEG system.
     6. EyeLink Host PC at 100.1.1.1, or set DUMMY_MODE=True.
-    7. Audio timing has been measured for your OPM lab (trigger-to-
-       ear delay via microphone at earpiece; record in experiment
-       metadata for MMN latency correction).
+    7. Audio transit delay measured; record in experiment metadata
+       for MMN latency correction.
 """
 
 # =============================================================================
@@ -261,7 +200,12 @@ from psychopy import visual, core, event, gui, data, logging
 from psychopy.hardware import keyboard
 import pylink
 from EyeLinkCoreGraphicsPsychoPy import EyeLinkCoreGraphicsPsychoPy
-from pypixxlib import _libdpx as dp
+
+# pypixxlib is imported later, after the startup GUI, so that DUMMY_VPIXX
+# mode can run without pypixxlib installed at all. Until then, `dp` is
+# just a placeholder name that gets bound to either the real module or a
+# no-op mock. Helper functions reference `dp` at call time, so both work.
+dp = None
 
 logging.console.setLevel(logging.CRITICAL)
 
@@ -387,6 +331,13 @@ DUMMY_MODE = False   # True skips EyeLink (development-only)
 EYELINK_IP = "100.1.1.1"
 CAL_TYPE   = "HV13"  # 13-point calibration
 
+# --- VPIXX ---
+# True: run without a real DATAPixx3 connected. All dp.DPx* calls become
+# no-ops; audio plays through PsychoPy sound as a fallback; *_vp and
+# *_vp_est columns are left blank in the CSV outputs. Useful for
+# development, demos, and testing on any machine.
+DUMMY_VPIXX = False
+
 
 # =============================================================================
 # HELPER FUNCTIONS
@@ -427,6 +378,19 @@ def trigger_color(value):
     Blue channel = trigger value; red and green channels = 0.
     """
     return rgb_255_to_psychopy([0, 0, value])
+
+
+def _fmt_vp(val, precision=6):
+    """Format a VPIXX-clock value for CSV output.
+
+    Returns an empty string when DUMMY_VPIXX is True (mock clock has no
+    meaningful value); otherwise returns the value formatted to the
+    requested decimal precision. Applied to every *_vp and *_vp_est
+    column so dummy-mode CSVs don't fill those cells with fake zeros.
+    """
+    if DUMMY_VPIXX:
+        return ''
+    return f"{val:.{precision}f}"
 
 
 def load_tone_into_buffer(tone_int16, buffer_addr):
@@ -852,7 +816,7 @@ def run_trial(trial_cfg, block_num, overall_trial, trial_in_block, is_training,
             'label':         ev['label'],
             'key_name':      ev['key_name'],
             'time_pp':       f"{ev['time']:.6f}",
-            'time_vp_est':       f"{ev['time_vp_est']:.6f}",
+            'time_vp_est':       _fmt_vp(ev['time_vp_est']),
         })
         all_presses_global.append((ev['label'], ev['time']))
 
@@ -874,11 +838,16 @@ def run_trial(trial_cfg, block_num, overall_trial, trial_in_block, is_training,
     # 2. Cue (500 ms)  --  trigger = cue direction
     # -------------------------------------------------------------------
     cue_hand = trial_cfg['cue_hand']
-    cue_stim = cue_left if cue_hand == 'left' else cue_right
+    cue_arrows = cue_left if cue_hand == 'left' else cue_right
     cue_trigger_value = (TRIGGER_CUE_LEFT if cue_hand == 'left'
                           else TRIGGER_CUE_RIGHT)
 
-    cue_stim.draw()
+    # Fixation cross first (always at exact pixel (0,0)); arrows flank
+    # it. This keeps the '+' from shifting between fixation-only and
+    # cue frames.
+    fixation.draw()
+    for arrow in cue_arrows:
+        arrow.draw()
     trigger_patch.fillColor = trigger_color(cue_trigger_value)
     trigger_patch.draw()
 
@@ -932,6 +901,13 @@ def run_trial(trial_cfg, block_num, overall_trial, trial_in_block, is_training,
         dp.DPxStartAudSched()
         dp.DPxWriteRegCacheAfterVideoSync()
 
+        # In dummy mode, queue the PsychoPy fallback sound for the same
+        # flip. Timing is approximate but audible for functional testing.
+        if DUMMY_VPIXX:
+            stim = deviant_stim if is_deviant else standard_stim
+            stim.stop()
+            win.callOnFlip(stim.play)
+
         # Flip unblocks at vsync. At that vsync:
         #   - VPIXX puts trigger byte on DOUT (MEG trigger edge)
         #   - Queued register push executes -> audio playback begins
@@ -961,7 +937,7 @@ def run_trial(trial_cfg, block_num, overall_trial, trial_in_block, is_training,
             'kind':           kind,
             'frequency':      DEVIANT_FREQ if is_deviant else STANDARD_FREQ,
             'onset_pp':       f"{tone_onset_pp:.6f}",
-            'onset_vp':       f"{tone_onset_vp:.6f}",
+            'onset_vp':       _fmt_vp(tone_onset_vp),
             'isi_after':      f"{isi_after:.4f}" if isi_after else '',
         })
 
@@ -1032,7 +1008,7 @@ def run_trial(trial_cfg, block_num, overall_trial, trial_in_block, is_training,
             'label':         ev['label'],
             'key_name':      ev['key_name'],
             'time_pp':       f"{ev['time']:.6f}",
-            'time_vp_est':       f"{ev['time_vp_est']:.6f}",
+            'time_vp_est':       _fmt_vp(ev['time_vp_est']),
         })
         all_presses_global.append((ev['label'], ev['time']))
 
@@ -1140,23 +1116,23 @@ def run_trial(trial_cfg, block_num, overall_trial, trial_in_block, is_training,
         'expected_button':     EXPECTED_BUTTONS[cue_hand],
         'n_standards':         n_std,
         'fixation_onset_pp':   f"{fixation_onset_pp:.6f}",
-        'fixation_onset_vp':   f"{fixation_onset_vp:.6f}",
+        'fixation_onset_vp':   _fmt_vp(fixation_onset_vp),
         'cue_onset_pp':        f"{cue_onset_pp:.6f}",
-        'cue_onset_vp':        f"{cue_onset_vp:.6f}",
+        'cue_onset_vp':        _fmt_vp(cue_onset_vp),
         'first_tone_onset_pp': f"{first_tone_onset_pp:.6f}",
-        'first_tone_onset_vp': f"{first_tone_onset_vp:.6f}",
+        'first_tone_onset_vp': _fmt_vp(first_tone_onset_vp),
         'deviant_onset_pp':    f"{deviant_onset_pp:.6f}",
-        'deviant_onset_vp':    f"{deviant_onset_vp:.6f}",
+        'deviant_onset_vp':    _fmt_vp(deviant_onset_vp),
         'response_button':     response_button if response_button else '',
         'response_key_name':   response_key_name if response_key_name else '',
         'response_time_pp':    f"{response_time_pp:.6f}" if response_time_pp is not None else '',
-        'response_time_vp_est':    f"{response_time_vp_est:.6f}" if response_time_vp_est is not None else '',
+        'response_time_vp_est':    _fmt_vp(response_time_vp_est) if response_time_vp_est is not None else '',
         'rt_pp':               f"{rt_pp:.4f}" if not np.isnan(rt_pp) else '',
-        'rt_vp_est':               f"{rt_vp_est:.4f}" if not np.isnan(rt_vp_est) else '',
+        'rt_vp_est':               _fmt_vp(rt_vp_est, precision=4) if not np.isnan(rt_vp_est) else '',
         'outcome':             outcome,
         'feedback_shown':      feedback_shown,
         'blink_onset_pp':      f"{blink_onset_pp:.6f}",
-        'blink_onset_vp':      f"{blink_onset_vp:.6f}",
+        'blink_onset_vp':      _fmt_vp(blink_onset_vp),
     }
     return result
 
@@ -1166,12 +1142,49 @@ def run_trial(trial_cfg, block_num, overall_trial, trial_in_block, is_training,
 # =============================================================================
 
 # --- Participant info dialog ---
-exp_info = {'participant': '', 'session': '001'}
-dlg = gui.DlgFromDict(dictionary=exp_info,
-                      title='Active Oddball (FT cued)',
-                      order=['participant', 'session'])
+exp_info = {
+    'participant':   '',
+    'session':       '001',
+    'dummy_eyelink': DUMMY_MODE,
+    'dummy_vpixx':   DUMMY_VPIXX,
+}
+dlg = gui.DlgFromDict(
+    dictionary=exp_info,
+    title='Active Oddball (FT cued)',
+    order=['participant', 'session', 'dummy_eyelink', 'dummy_vpixx'],
+)
 if not dlg.OK:
     core.quit()
+
+# Read GUI values back into module-level flags. Helper functions and
+# CSV writers reference these flags at call time, so overriding here
+# takes effect throughout the run.
+DUMMY_MODE  = bool(exp_info['dummy_eyelink'])
+DUMMY_VPIXX = bool(exp_info['dummy_vpixx'])
+
+# Set up the pypixxlib module (real or mock) based on DUMMY_VPIXX.
+if DUMMY_VPIXX:
+    print("=== DUMMY_VPIXX ENABLED ===")
+    print("  Mock DATAPixx3: all dp.DPx* calls are no-ops.")
+    print("  Audio: PsychoPy sound fallback (not vsync-locked).")
+    print("  *_vp and *_vp_est CSV columns will be blank.")
+
+    class _MockDPx:
+        """No-op stand-in for pypixxlib._libdpx.
+
+        Every DPx* call becomes a no-op. DPxGetTime returns 0.0 so
+        that downstream arithmetic (e.g. time_vp_est calculations)
+        doesn't crash; the resulting values are blanked in CSV output
+        via _fmt_vp() rather than saved.
+        """
+        def __getattr__(self, name):
+            if name == 'DPxGetTime':
+                return lambda: 0.0
+            return lambda *a, **k: None
+
+    dp = _MockDPx()
+else:
+    from pypixxlib import _libdpx as dp
 
 exp_info['date'] = data.getDateStr()
 
@@ -1256,14 +1269,25 @@ fixation = visual.ShapeStim(
     lineColor='white', colorSpace='named',
 )
 
-# Cue: fixation cross flanked by arrows (matches FT figure exactly).
-# Rendered as a single TextStim for simplicity ('>+>' or '<+<').
-cue_left = visual.TextStim(
-    win, text='<   +   <', color='white', height=60,
-)
-cue_right = visual.TextStim(
-    win, text='>   +   >', color='white', height=60,
-)
+# Cue: two arrow TextStims flanking the fixation cross. The fixation
+# cross is drawn separately as its own ShapeStim so it stays anchored
+# at exact pixel (0, 0). Rendering the whole cue "<   +   <" as one
+# TextStim would place the '+' glyph a pixel or two off center (font
+# baseline / bounding-box metrics), causing the fixation to appear to
+# shift during cue frames vs pure-fixation frames.
+CUE_ARROW_OFFSET = 50   # pixels from center to each arrow's own center
+cue_left = [
+    visual.TextStim(win, text='<', color='white', height=60,
+                     pos=(-CUE_ARROW_OFFSET, 0)),
+    visual.TextStim(win, text='<', color='white', height=60,
+                     pos=(+CUE_ARROW_OFFSET, 0)),
+]
+cue_right = [
+    visual.TextStim(win, text='>', color='white', height=60,
+                     pos=(-CUE_ARROW_OFFSET, 0)),
+    visual.TextStim(win, text='>', color='white', height=60,
+                     pos=(+CUE_ARROW_OFFSET, 0)),
+]
 
 # Feedback stimuli: red text on black.
 feedback_miss = visual.TextStim(
@@ -1300,8 +1324,26 @@ deviant_wave  = make_tone_int16(DEVIANT_FREQ,  TONE_DURATION,
                                 AUDIO_SAMPLE_RATE, RAMP_DURATION)
 
 # Push both tones to DATAPixx3 RAM at their respective buffer addresses.
+# In DUMMY_VPIXX mode this is a no-op via the mock dp module.
 load_tone_into_buffer(standard_wave, STANDARD_BUFFER_ADDR)
 load_tone_into_buffer(deviant_wave,  DEVIANT_BUFFER_ADDR)
+
+# In dummy mode, also wrap the tones in PsychoPy Sound objects for
+# audible playback via the computer speakers. Timing is not vsync-
+# locked (typical PsychoPy audio latency 20-60 ms depending on backend);
+# it's a functional demo, not a precise stimulus.
+standard_stim = None
+deviant_stim  = None
+if DUMMY_VPIXX:
+    from psychopy import sound
+    standard_stim = sound.Sound(
+        value=standard_wave.astype(np.float32) / 32767.0,
+        sampleRate=AUDIO_SAMPLE_RATE, stereo=False,
+    )
+    deviant_stim = sound.Sound(
+        value=deviant_wave.astype(np.float32) / 32767.0,
+        sampleRate=AUDIO_SAMPLE_RATE, stereo=False,
+    )
 
 # Sample counts used by prep_tone_schedule() at trial time. Module-level
 # names because prep_tone_schedule reads them from module scope.
@@ -1407,14 +1449,14 @@ instr = visual.TextStim(
     win,
     text=("You will hear a series of tones.\n\n"
           "On each trial an arrow cue appears:\n"
-          "    <  +  <  = LEFT hand    ->  +  > = RIGHT hand\n\n"
+          "    <  <   = LEFT hand          >  >   = RIGHT hand\n\n"
           "After the cue you will hear several identical tones,\n"
           "followed by ONE different (higher) tone.\n\n"
           "As soon as you hear the DIFFERENT tone,\n"
           "press the INDEX FINGER button on the cued hand\n"
           "as quickly as possible.\n\n"
           "If you miss or press the wrong button, you'll see feedback.\n\n"
-          "When 'BLINK' appears, you may blink freely.\n"
+          "When 'BLINK' appears, you have half a second to blink.\n"
           "Otherwise please try not to blink and hold your gaze on the cross.\n\n"
           "Experimenter: press SPACE to start the training block."),
     color='white', height=26, wrapWidth=1000,
@@ -1643,7 +1685,7 @@ for ev in _end_events:
         'label':         ev['label'],
         'key_name':      ev['key_name'],
         'time_pp':       f"{ev['time']:.6f}",
-        'time_vp_est':       f"{ev_vp_est:.6f}",
+        'time_vp_est':       _fmt_vp(ev_vp_est),
     })
 
 # Final flush
