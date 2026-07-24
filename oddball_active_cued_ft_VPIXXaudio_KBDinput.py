@@ -198,11 +198,11 @@ import numpy as np
 
 from psychopy import visual, core, event, gui, data, logging
 from psychopy.hardware import keyboard
-# pylink and EyeLinkCoreGraphicsPsychoPy are optional dependencies. If
-# they're not installed, the script can still run in DUMMY_MODE via
-# stand-in mocks installed after the startup GUI. In normal (non-dummy)
-# mode we still require them and will fail at connect_eyelink() time
-# with the usual EyeLink error message.
+# pylink and EyeLinkCoreGraphicsPsychoPy are required dependencies to eye
+# track. If they're not installed, DUMMY_MODE (EyeLink) is auto-forced on
+# after the startup GUI and stand-in mocks are installed, so the paradigm
+# runs end-to-end without eye tracking. In normal (non-dummy) mode with
+# the libraries installed, the real EyeLink connection is used.
 try:
     import pylink
     from EyeLinkCoreGraphicsPsychoPy import EyeLinkCoreGraphicsPsychoPy
@@ -212,10 +212,11 @@ except ImportError:
     EyeLinkCoreGraphicsPsychoPy = None
     _HAS_PYLINK = False
 
-# pypixxlib is optional. In DUMMY_VPIXX mode we install a no-op mock
-# after the startup GUI. If the library isn't installed at all, we
-# force DUMMY_VPIXX on and warn. The actual `dp` binding happens after
-# the GUI so helper functions can reference it lazily.
+# pypixxlib is a required dependency for high-precision VPIXX audio
+# delivery. In DUMMY_VPIXX mode we install a no-op mock after the
+# startup GUI. If the library isn't installed at all, we force
+# DUMMY_VPIXX on and warn. The actual `dp` binding happens after the
+# GUI so helper functions can reference it lazily.
 try:
     from pypixxlib import _libdpx as _real_dp
     _HAS_PYPIXXLIB = True
