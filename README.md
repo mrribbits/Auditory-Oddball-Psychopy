@@ -17,9 +17,10 @@ continuous EyeLink recording, VPIXX pixel-mode triggers, VPIXX audio delivery.
 
 - PsychoPy 2026.1+
 - pypixxlib (VPIXX)
-- pylink (SR Research EyeLink)
+- pylink (SR Research)
 
 ## Hardware Requirements
 - VPixx DATAPixx3, SOUNDPixx, PROPixx
 - SR Eyelink
-- Eyelink and VPIXX dummy mode options are available.
+
+- Eyelink and VPIXX dummy mode options are available to run the script without the corresponding hardware and/or dependencies installed.
