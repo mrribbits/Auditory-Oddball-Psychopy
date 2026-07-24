@@ -18,6 +18,8 @@ continuous EyeLink recording, VPIXX pixel-mode triggers, VPIXX audio delivery.
 - VPixx DATAPixx3, SOUNDPixx, PROPixx
 - SR Eyelink
 
+## Eyelink and VPIXX dummy modes built-in
+
 ## Data handling
 
 The `results/` folder is gitignored.
