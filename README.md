@@ -8,7 +8,9 @@ Includes bimanual left/right index-finger responses, 3 blocks × 100 trials,
 continuous EyeLink recording, VPIXX pixel-mode triggers, VPIXX audio delivery.
 
 `oddball_active_cued_ft_VPIXXaudio_KBDinput.py` — main script
+
 `EyeLinkCoreGraphicsPsychoPy.py` — required for Eyelink
+
 `*.wav` — optional sound files for Eyelink
 
 ## Software Requirements
