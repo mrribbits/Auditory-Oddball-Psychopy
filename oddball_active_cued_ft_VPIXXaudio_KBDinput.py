@@ -198,13 +198,30 @@ import numpy as np
 
 from psychopy import visual, core, event, gui, data, logging
 from psychopy.hardware import keyboard
-import pylink
-from EyeLinkCoreGraphicsPsychoPy import EyeLinkCoreGraphicsPsychoPy
+# pylink and EyeLinkCoreGraphicsPsychoPy are optional dependencies. If
+# they're not installed, the script can still run in DUMMY_MODE via
+# stand-in mocks installed after the startup GUI. In normal (non-dummy)
+# mode we still require them and will fail at connect_eyelink() time
+# with the usual EyeLink error message.
+try:
+    import pylink
+    from EyeLinkCoreGraphicsPsychoPy import EyeLinkCoreGraphicsPsychoPy
+    _HAS_PYLINK = True
+except ImportError:
+    pylink = None
+    EyeLinkCoreGraphicsPsychoPy = None
+    _HAS_PYLINK = False
 
-# pypixxlib is imported later, after the startup GUI, so that DUMMY_VPIXX
-# mode can run without pypixxlib installed at all. Until then, `dp` is
-# just a placeholder name that gets bound to either the real module or a
-# no-op mock. Helper functions reference `dp` at call time, so both work.
+# pypixxlib is optional. In DUMMY_VPIXX mode we install a no-op mock
+# after the startup GUI. If the library isn't installed at all, we
+# force DUMMY_VPIXX on and warn. The actual `dp` binding happens after
+# the GUI so helper functions can reference it lazily.
+try:
+    from pypixxlib import _libdpx as _real_dp
+    _HAS_PYPIXXLIB = True
+except ImportError:
+    _real_dp = None
+    _HAS_PYPIXXLIB = False
 dp = None
 
 logging.console.setLevel(logging.CRITICAL)
@@ -1162,6 +1179,63 @@ if not dlg.OK:
 DUMMY_MODE  = bool(exp_info['dummy_eyelink'])
 DUMMY_VPIXX = bool(exp_info['dummy_vpixx'])
 
+# If pylink is not installed, force DUMMY_MODE on -- the script has no
+# way to talk to a real EyeLink without it. Warn if the user disagrees.
+if not _HAS_PYLINK:
+    if not DUMMY_MODE:
+        print("WARNING: pylink is not installed. Forcing DUMMY_MODE (EyeLink) on.")
+        DUMMY_MODE = True
+
+# Install pylink stand-ins when we don't have the real library. These
+# only get called if DUMMY_MODE is on (the block above forces that
+# when pylink is missing), so the mocks are covering EyeLink-disabled
+# code paths only.
+if not _HAS_PYLINK:
+    class _MockPylink:
+        """No-op stand-in for the pylink module.
+
+        Provides the constants and utility functions the script uses,
+        plus a mock EyeLink tracker whose methods are all no-ops (or
+        return sensible defaults so isConnected/isRecording checks
+        pass through the DUMMY_MODE code paths).
+        """
+        TRIAL_OK = 0
+        ESC_KEY  = 27
+
+        def __getattr__(self, name):
+            # pumpDelay, msecDelay, openGraphicsEx, etc. -> no-ops
+            return lambda *a, **k: None
+
+        class EyeLink:
+            def __init__(self, ip=None):
+                self.ip = ip
+            def __getattr__(self, name):
+                if name == 'isConnected':
+                    return lambda: 1
+                if name == 'isRecording':
+                    return lambda: 0        # 0 == TRIAL_OK
+                if name == 'getTrackerVersionString':
+                    return lambda: 'DUMMY EyeLink 0.0'
+                return lambda *a, **k: None
+
+    class _MockELGraphics:
+        """Minimal stand-in for EyeLinkCoreGraphicsPsychoPy."""
+        def __init__(self, tracker, win):
+            self.tracker = tracker
+            self.win     = win
+
+    pylink = _MockPylink()
+    EyeLinkCoreGraphicsPsychoPy = _MockELGraphics
+    print("=== pylink not installed: using mock EyeLink module ===")
+
+# If pypixxlib is not installed, force DUMMY_VPIXX on -- the script has
+# no way to talk to a real DATAPixx3 without it. Warn if the user
+# disagrees.
+if not _HAS_PYPIXXLIB:
+    if not DUMMY_VPIXX:
+        print("WARNING: pypixxlib is not installed. Forcing DUMMY_VPIXX on.")
+        DUMMY_VPIXX = True
+
 # Set up the pypixxlib module (real or mock) based on DUMMY_VPIXX.
 if DUMMY_VPIXX:
     print("=== DUMMY_VPIXX ENABLED ===")
@@ -1184,7 +1258,7 @@ if DUMMY_VPIXX:
 
     dp = _MockDPx()
 else:
-    from pypixxlib import _libdpx as dp
+    dp = _real_dp
 
 exp_info['date'] = data.getDateStr()
 
