@@ -29,7 +29,7 @@ sound (audible but not vsync-locked), and *_vp / *_vp_est columns
 in the CSVs are left blank to make the dummy run distinguishable
 from a real one.
 
-Structure (one trial = one cycle of the figure):
+Structure (one trial = one cycle of the FieldTrip tutorial figure):
 
     +-----------+-----+-----------------+---------+----------+-------+
     | fixation  | cue | auditory stim   | resp.   | feedback | BLINK |
