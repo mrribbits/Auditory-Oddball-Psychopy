@@ -76,7 +76,7 @@ Audio playback and MEG trigger edge fire at the same vsync with no
 software offset between them. The only remaining delay in the auditory
 pathway is the physical transit through the OPM headphone tubes (or
 loudspeaker-to-ear) - a constant acoustic latency to measure once with
-a microphone and subtract from MMN peak latencies in analysis.
+a microphone and subtract from tone-locked event times in analysis.
 
 IMPORTANT INVARIANT: between prep_tone_schedule and the DPxStartAudSched
 + DPxWriteRegCacheAfterVideoSync pair, no other code may call
@@ -193,7 +193,7 @@ PRE-FLIGHT CHECKLIST
     6. EyeLink Host PC at 100.1.1.1, or check `dummy_eyelink` in the
        startup dialog to skip it.
     7. Audio transit delay measured; record in experiment metadata
-       for MMN latency correction.
+       for latency correction in analysis.
 """
 
 # =============================================================================
