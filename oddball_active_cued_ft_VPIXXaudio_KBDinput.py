@@ -21,6 +21,14 @@ MEG trigger pixel. Responses come from a Current Designs button box
 that presents itself as an HID keyboard. Eye tracking runs on the
 EyeLink Host PC throughout.
 
+For local testing without hardware, the startup GUI offers
+`dummy_eyelink` and `dummy_vpixx` checkboxes. Either can also be
+auto-forced on when the corresponding library (pylink / pypixxlib)
+isn't installed. In dummy_vpixx mode audio falls back to PsychoPy
+sound (audible but not vsync-locked), and *_vp / *_vp_est columns
+in the CSVs are left blank to make the dummy run distinguishable
+from a real one.
+
 Structure (one trial = one cycle of the figure):
 
     +-----------+-----+-----------------+---------+----------+-------+
@@ -124,7 +132,7 @@ startup and exits if 'left_index' and 'right_index' are not both
 defined; other finger positions are optional.
 
 Definitive response timing for MEG analysis should be read from the
-button box's TTL trigger channel in the MEG data, not from these
+button box's TTL wiring to the MEG trigger channel, not from these
 keyboard timestamps: the OS HID pipeline carries a few ms of jitter
 that is fine for behavior but not for tight MEG locking.
 
@@ -172,15 +180,18 @@ results/sub-<p>_ses-<s>_task-oddballftcued/
 
 PRE-FLIGHT CHECKLIST
 --------------------
-    1. VPIXX device is on and reachable (DPxOpen succeeds).
+    1. VPIXX device is on and reachable (DPxOpen succeeds), or check
+       `dummy_vpixx` in the startup dialog to run without it.
     2. VPIXX is running Pixel Mode B (this script enables it).
     3. Audio set to desired path (headphones or loudspeakers) and
        volume sufficient.
     4. Button box is reporting keyboard events. Open any text field,
        press each button, note what key each finger emits, and fill
        in KEY_CODES accordingly.
-    5. Button box TTL trigger output is wired into the MEG system.
-    6. EyeLink Host PC at 100.1.1.1, or set DUMMY_MODE=True.
+    5. Button box TTL trigger output is wired into the MEG trigger
+       channel.
+    6. EyeLink Host PC at 100.1.1.1, or check `dummy_eyelink` in the
+       startup dialog to skip it.
     7. Audio transit delay measured; record in experiment metadata
        for MMN latency correction.
 """
@@ -273,7 +284,8 @@ INTERBLOCK_MIN_REST = 15.0      # seconds before SPACE is accepted at break
 # --- Trigger pixel (VPIXX Pixel Mode B) ---
 # Values are the blue channel of a 1x1 upper-left patch. The red and
 # green channels are always 0. Values chosen as distinct powers of 2
-# so combined triggers (unlikely here) would be OR-decodable.
+# so that any future combined events (currently none) would be
+# OR-decodable.
 TRIGGER_PATCH_SIZE = 1
 TRIGGER_STANDARD   = 1          # standard tone onset
 TRIGGER_DEVIANT    = 2          # deviant tone onset
@@ -295,11 +307,11 @@ DISPLAY_FRAME_MS = 8.33         # 120 Hz refresh; use 16.67 for 60 Hz
 
 # --- Response keys (keyboard input from Current Designs or similar box) ---
 #
-# TODO: fill in with your button box's actual key -> finger mapping.
-# The key names on the left must match what psychopy.hardware.keyboard
-# reports (see PsychoPy key-name reference; e.g. '1', 'a', 'space',
-# 'lshift', 'num_1', etc.). The finger labels on the right can be any
-# string; the ones the paradigm actually scores are 'left_index' and
+# Edit this dict when swapping to a different button box. The key names
+# on the left must match what psychopy.hardware.keyboard reports (see
+# PsychoPy key-name reference; e.g. '1', 'a', 'space', 'lshift',
+# 'num_1', etc.). The finger labels on the right can be any string;
+# the ones the paradigm actually scores are 'left_index' and
 # 'right_index'.
 #
 # Minimum required entries for the paradigm to run:
@@ -452,9 +464,9 @@ def get_keyboard_events(kb, key_codes, exit_key=EXIT_KEY):
     """Poll the keyboard for new events and classify them.
 
     Uses psychopy.hardware.keyboard.Keyboard.getKeys(), which drains
-    the keyboard's internal buffer (equivalent to the previous
-    drain_din_log for the VPIXX version). Only key names present in
-    `key_codes` (plus `exit_key`) are captured; other keys are ignored.
+    the keyboard's internal buffer so repeated calls only return NEW
+    events. Only key names present in `key_codes` (plus `exit_key`)
+    are captured; other keys are ignored.
 
     Parameters
     ----------
@@ -501,6 +513,29 @@ def get_keyboard_events(kb, key_codes, exit_key=EXIT_KEY):
     return events, abort
 
 
+def estimate_vp_times(events):
+    """Tag each event with an approximate VPIXX-clock timestamp.
+
+    Samples DPxGetTime and core.getTime "now" as a shared anchor,
+    then converts each event's PsychoPy-clock time to VP-clock time
+    by preserving the delta. Accurate to within ~one video frame
+    since the anchors weren't captured at the event moment. In
+    DUMMY_VPIXX mode the anchor is 0 (mock clock) and downstream
+    _fmt_vp() blanks the column, so the estimation is a no-op in
+    practice.
+
+    Modifies each event dict in place, adding a 'time_vp_est' key.
+    No-op if `events` is empty.
+    """
+    if not events:
+        return
+    dp.DPxUpdateRegCache()
+    anchor_vp = dp.DPxGetTime()
+    anchor_pp = core.getTime()
+    for ev in events:
+        ev['time_vp_est'] = anchor_vp + (ev['time'] - anchor_pp)
+
+
 def generate_block_sequence(n_trials, min_std, max_std,
                             isi_min, isi_max, seed=None):
     """Build the trial list for one block.
@@ -544,10 +579,8 @@ def generate_block_sequence(n_trials, min_std, max_std,
 def init_vpixx():
     """Open the VPIXX device, enable Pixel Mode B, and init the audio codec.
 
-    The audio codec output volume defaults to 0.0 on a fresh device
-    connection, which produces cleanly-scheduled silent playback with
-    no error -- a very hard silence to debug. Left and right volumes
-    are set to VPIXX_AUDIO_VOLUME here.
+    Sets left/right audio volume to VPIXX_AUDIO_VOLUME; see the
+    constant's comment for why that matters.
     """
     dp.DPxOpen()
     dp.DPxStopAllScheds()
@@ -677,17 +710,10 @@ def write_trials_csv(filename, rows):
     Timestamp columns are named with a clock-provenance suffix:
         *_pp        -- PsychoPy default clock (behavioral RT reference)
         *_vp        -- VPIXX DATAPixx3 hardware clock (MEG alignment)
-        *_vp_est    -- Estimated VPIXX-clock timestamp for events that
-                       VPIXX did NOT directly detect (e.g. keyboard
-                       responses arrive via the OS HID pipeline, not
-                       through VPIXX). Computed by converting the
-                       PsychoPy-clock event time using the PP<->VP
-                       correspondence sampled at each response-window
-                       flip. Accurate to within ~one video frame.
-                       Definitive response timestamps for MEG analysis
-                       should come from the button box's TTL wiring
-                       into the MEG amplifier trigger channel, not
-                       from this estimated column.
+        *_vp_est    -- Estimated VPIXX-clock time for events VPIXX did
+                       not directly detect (keyboard presses). See the
+                       KEYBOARD INPUT section of the module docstring
+                       for how this is derived and the accuracy caveat.
     """
     fields = ['overall_trial', 'block', 'trial_in_block', 'is_training',
               'cue_hand', 'expected_button', 'n_standards',
@@ -730,13 +756,8 @@ def write_presses_csv(filename, rows):
     Timestamps:
         time_pp     - PsychoPy-clock timestamp of the key-down event.
         time_vp_est - Estimated VPIXX-clock timestamp of the same event.
-                      VPIXX does NOT directly detect keyboard input;
-                      this column is derived by converting time_pp
-                      using the PP<->VP correspondence sampled at each
-                      response-window flip. Accurate to within ~one
-                      video frame. For definitive response timing in
-                      MEG analysis, use the button box's TTL trigger
-                      channel in the MEG data instead.
+                      See KEYBOARD INPUT in the module docstring for
+                      how this is derived and the accuracy caveat.
     """
     fields = ['context', 'overall_trial', 'block', 'kind', 'label',
               'key_name', 'time_pp', 'time_vp_est']
@@ -799,11 +820,11 @@ def run_trial(trial_cfg, block_num, overall_trial, trial_in_block, is_training,
               tones_log, presses_log, all_presses_global):
     """Run one full trial (fixation -> cue -> tones -> response -> feedback -> BLINK).
 
-    Presses are drained at strategic points inside the trial:
-      - Start of trial: sweep out any inter-trial presses (logged as
-        context='inter_trial').
-      - After the response window: catch responses to this trial.
-      - After the BLINK: catch anything else before the next fixation.
+    Presses are drained at two strategic points inside the trial:
+      - Start of trial: sweep out any leftover inter-trial presses
+        (logged as context='inter_trial').
+      - Every frame during the response window: catch responses to
+        this trial (logged as context='trial').
 
     Returns a trial-level result dict.
     """
@@ -817,15 +838,8 @@ def run_trial(trial_cfg, block_num, overall_trial, trial_in_block, is_training,
     if abort_key:
         return {'aborted': True}
 
-    # Anchor a VP timestamp for these inter-trial events. Since they
-    # came in between flips, we only have an approximate PP<->VP
-    # correspondence; use the current DPxGetTime and core.getTime().
-    if inter_events:
-        dp.DPxUpdateRegCache()
-        anchor_vp = dp.DPxGetTime()
-        anchor_pp = core.getTime()
+    estimate_vp_times(inter_events)
     for ev in inter_events:
-        ev['time_vp_est'] = anchor_vp + (ev['time'] - anchor_pp)
         presses_log.append({
             'context':       'inter_trial',
             'overall_trial': overall_trial,
@@ -834,7 +848,7 @@ def run_trial(trial_cfg, block_num, overall_trial, trial_in_block, is_training,
             'label':         ev['label'],
             'key_name':      ev['key_name'],
             'time_pp':       f"{ev['time']:.6f}",
-            'time_vp_est':       _fmt_vp(ev['time_vp_est']),
+            'time_vp_est':   _fmt_vp(ev['time_vp_est']),
         })
         all_presses_global.append((ev['label'], ev['time']))
 
@@ -1002,14 +1016,10 @@ def run_trial(trial_cfg, block_num, overall_trial, trial_in_block, is_training,
         trial_events.extend(events_this_frame)
 
     # Final drain to catch anything that arrived after the last flip.
-    dp.DPxUpdateRegCache()
-    final_vp = dp.DPxGetTime()
-    final_pp = core.getTime()
     late_events, abort_key = get_keyboard_events(kb, KEY_CODES)
     if abort_key:
         return {'aborted': True}
-    for ev in late_events:
-        ev['time_vp_est'] = final_vp + (ev['time'] - final_pp)
+    estimate_vp_times(late_events)
     trial_events.extend(late_events)
 
     # -------------------------------------------------------------------
@@ -1026,7 +1036,7 @@ def run_trial(trial_cfg, block_num, overall_trial, trial_in_block, is_training,
             'label':         ev['label'],
             'key_name':      ev['key_name'],
             'time_pp':       f"{ev['time']:.6f}",
-            'time_vp_est':       _fmt_vp(ev['time_vp_est']),
+            'time_vp_est':   _fmt_vp(ev['time_vp_est']),
         })
         all_presses_global.append((ev['label'], ev['time']))
 
@@ -1038,18 +1048,6 @@ def run_trial(trial_cfg, block_num, overall_trial, trial_in_block, is_training,
     # All times here are in the PsychoPy default clock.
     resp_min_pp = deviant_onset_pp + RESP_WIN_MIN
     resp_max_pp = deviant_onset_pp + RESP_WIN_MAX
-
-    # TEMPORARY DEBUG - remove after diagnosing
-    print(f"\n--- Trial {overall_trial}, cue={cue_hand} ---")
-    print(f"  deviant_onset_pp = {deviant_onset_pp:.3f}")
-    print(f"  scoring window   = [{resp_min_pp:.3f}, {resp_max_pp:.3f}]")
-    print(f"  events received  = {len(trial_events)}")
-    for ev in trial_events:
-        dt = ev['time'] - deviant_onset_pp
-        in_window = resp_min_pp <= ev['time'] <= resp_max_pp
-        print(f"    key={ev['key_name']!r}  label={ev['label']}  "
-              f"time={ev['time']:.3f}  dt_from_deviant={dt:+.3f}s  "
-              f"in_window={in_window}")
 
     response_button   = None
     response_key_name = None
@@ -1103,7 +1101,7 @@ def run_trial(trial_cfg, block_num, overall_trial, trial_in_block, is_training,
         win.flip()
 
     # -------------------------------------------------------------------
-    # 7. BLINK trial (500 ms text)
+    # 7. BLINK phase (500 ms text)
     # -------------------------------------------------------------------
     blink_text.draw()
     trigger_patch.fillColor = trigger_color(TRIGGER_BLINK)
@@ -1125,32 +1123,32 @@ def run_trial(trial_cfg, block_num, overall_trial, trial_in_block, is_training,
     # 8. Build the trial result
     # -------------------------------------------------------------------
     result = {
-        'aborted':             False,
-        'overall_trial':       overall_trial,
-        'block':               context_tag,
-        'trial_in_block':      trial_in_block,
-        'is_training':         is_training,
-        'cue_hand':            cue_hand,
-        'expected_button':     EXPECTED_BUTTONS[cue_hand],
-        'n_standards':         n_std,
-        'fixation_onset_pp':   f"{fixation_onset_pp:.6f}",
-        'fixation_onset_vp':   _fmt_vp(fixation_onset_vp),
-        'cue_onset_pp':        f"{cue_onset_pp:.6f}",
-        'cue_onset_vp':        _fmt_vp(cue_onset_vp),
-        'first_tone_onset_pp': f"{first_tone_onset_pp:.6f}",
-        'first_tone_onset_vp': _fmt_vp(first_tone_onset_vp),
-        'deviant_onset_pp':    f"{deviant_onset_pp:.6f}",
-        'deviant_onset_vp':    _fmt_vp(deviant_onset_vp),
-        'response_button':     response_button if response_button else '',
-        'response_key_name':   response_key_name if response_key_name else '',
-        'response_time_pp':    f"{response_time_pp:.6f}" if response_time_pp is not None else '',
-        'response_time_vp_est':    _fmt_vp(response_time_vp_est) if response_time_vp_est is not None else '',
-        'rt_pp':               f"{rt_pp:.4f}" if not np.isnan(rt_pp) else '',
-        'rt_vp_est':               _fmt_vp(rt_vp_est, precision=4) if not np.isnan(rt_vp_est) else '',
-        'outcome':             outcome,
-        'feedback_shown':      feedback_shown,
-        'blink_onset_pp':      f"{blink_onset_pp:.6f}",
-        'blink_onset_vp':      _fmt_vp(blink_onset_vp),
+        'aborted':              False,
+        'overall_trial':        overall_trial,
+        'block':                context_tag,
+        'trial_in_block':       trial_in_block,
+        'is_training':          is_training,
+        'cue_hand':             cue_hand,
+        'expected_button':      EXPECTED_BUTTONS[cue_hand],
+        'n_standards':          n_std,
+        'fixation_onset_pp':    f"{fixation_onset_pp:.6f}",
+        'fixation_onset_vp':    _fmt_vp(fixation_onset_vp),
+        'cue_onset_pp':         f"{cue_onset_pp:.6f}",
+        'cue_onset_vp':         _fmt_vp(cue_onset_vp),
+        'first_tone_onset_pp':  f"{first_tone_onset_pp:.6f}",
+        'first_tone_onset_vp':  _fmt_vp(first_tone_onset_vp),
+        'deviant_onset_pp':     f"{deviant_onset_pp:.6f}",
+        'deviant_onset_vp':     _fmt_vp(deviant_onset_vp),
+        'response_button':      response_button if response_button else '',
+        'response_key_name':    response_key_name if response_key_name else '',
+        'response_time_pp':     f"{response_time_pp:.6f}" if response_time_pp is not None else '',
+        'response_time_vp_est': _fmt_vp(response_time_vp_est) if response_time_vp_est is not None else '',
+        'rt_pp':                f"{rt_pp:.4f}" if not np.isnan(rt_pp) else '',
+        'rt_vp_est':            _fmt_vp(rt_vp_est, precision=4) if not np.isnan(rt_vp_est) else '',
+        'outcome':              outcome,
+        'feedback_shown':       feedback_shown,
+        'blink_onset_pp':       f"{blink_onset_pp:.6f}",
+        'blink_onset_vp':       _fmt_vp(blink_onset_vp),
     }
     return result
 
@@ -1270,7 +1268,7 @@ sub = exp_info['participant'].replace('-', '').replace('_', '')
 ses = exp_info['session'].replace('-', '').replace('_', '')
 edf_fname = f"s{sub}s{ses}"[:8] + '.EDF'
 local_edf_name = (f"sub-{exp_info['participant']}"
-                  f"_ses-{exp_info['session']}_task-oddballftcuedpyaudkbd")
+                  f"_ses-{exp_info['session']}_task-oddballftcued")
 
 session_folder = os.path.join(results_folder, local_edf_name)
 os.makedirs(session_folder, exist_ok=True)
@@ -1310,8 +1308,7 @@ if _missing:
 # --- Keyboard for response input ---
 # psychopy.hardware.keyboard.Keyboard uses the modern low-latency
 # backend when available. getKeys() drains the internal buffer, so
-# repeated calls only return NEW events (same pattern as the VPIXX
-# DIN log drain used by the sibling scripts).
+# repeated calls only return NEW events.
 kb = keyboard.Keyboard()
 kb.clearEvents()   # discard any pre-experiment key presses
 
@@ -1746,12 +1743,8 @@ el_tracker.sendMessage('EXPERIMENT_END')
 
 # One last drain of the keyboard buffer in case of trailing presses
 _end_events, _ = get_keyboard_events(kb, KEY_CODES)
-if _end_events:
-    dp.DPxUpdateRegCache()
-    _end_anchor_vp = dp.DPxGetTime()
-    _end_anchor_pp = core.getTime()
+estimate_vp_times(_end_events)
 for ev in _end_events:
-    ev_vp_est = _end_anchor_vp + (ev['time'] - _end_anchor_pp)
     presses_log.append({
         'context':       'end',
         'overall_trial': overall_trial,
@@ -1760,7 +1753,7 @@ for ev in _end_events:
         'label':         ev['label'],
         'key_name':      ev['key_name'],
         'time_pp':       f"{ev['time']:.6f}",
-        'time_vp_est':       _fmt_vp(ev_vp_est),
+        'time_vp_est':   _fmt_vp(ev['time_vp_est']),
     })
 
 # Final flush
