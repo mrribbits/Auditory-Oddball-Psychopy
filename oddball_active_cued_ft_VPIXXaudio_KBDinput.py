@@ -132,7 +132,7 @@ startup and exits if 'left_index' and 'right_index' are not both
 defined; other finger positions are optional.
 
 Definitive response timing for MEG analysis should be read from the
-button box's TTL wiring to the MEG trigger channel, not from these
+button box's TTL wiring to the MEG BNC channels, not from these
 keyboard timestamps: the OS HID pipeline carries a few ms of jitter
 that is fine for behavior but not for tight MEG locking.
 
@@ -188,8 +188,8 @@ PRE-FLIGHT CHECKLIST
     4. Button box is reporting keyboard events. Open any text field,
        press each button, note what key each finger emits, and fill
        in KEY_CODES accordingly.
-    5. Button box TTL trigger output is wired into the MEG trigger
-       channel.
+    5. Button box TTL trigger output is wired into the MEG BNC
+       channels.
     6. EyeLink Host PC at 100.1.1.1, or check `dummy_eyelink` in the
        startup dialog to skip it.
     7. Audio transit delay measured; record in experiment metadata
@@ -324,17 +324,19 @@ DISPLAY_FRAME_MS = 8.33         # 120 Hz refresh; use 16.67 for 60 Hz
 #
 # Example (uncomment and edit):
 # KEY_CODES = {
-#     '1': 'left_pinky',
-#     '2': 'left_ring',
-#     '3': 'left_middle',
-#     '4': 'left_index',
-#     '6': 'right_index',
-#     '7': 'right_middle',
-#     '8': 'right_ring',
-#     '9': 'right_pinky',
+#     '1': 'right_thumb',
+#     '2': 'right_index',
+#     '3': 'right_middle',
+#     '4': 'right_ring',
+#     '5': 'right_pinky',
+#     '6': 'left_thumb',
+#     '7': 'left_index',
+#     '8': 'left_middle',
+#     '9': 'left_ring',
+#     '10': 'left_pinky',
 # }
 KEY_CODES = {
-    '1': 'left_index',
+    '7': 'left_index',
     '2': 'right_index',
 }
 
