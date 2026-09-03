@@ -1577,6 +1577,8 @@ if RUN_TRAINING and training_seq:
             all_presses_global=all_presses_global,
         )
         if result.get('aborted'):
+            print(f"[abort] training trial {overall_trial}: "
+                  f"aborted flag returned by run_trial")
             aborted = True
             break
         trials_log.append(result)
@@ -1614,6 +1616,7 @@ if RUN_TRAINING and training_seq:
         win.flip()
         keys = event.waitKeys(keyList=['space', 'escape'])
         if 'escape' in keys:
+            print("[abort] ESC pressed at training->main transition")
             aborted = True
 
         if not aborted:
@@ -1634,9 +1637,16 @@ def show_break_screen(block_completed, block_correct, block_total):
 
     Enforces a minimum rest of INTERBLOCK_MIN_REST seconds before SPACE
     is accepted (subject gets a real break; experimenter can't rush past).
+
+    Uses the module-level `kb` Keyboard object for input rather than the
+    old psychopy.event module. The two share a buffer on some Windows
+    backends, so mixing them can cause stale key events to leak in
+    unexpectedly.
     """
     pct = 100.0 * block_correct / block_total if block_total > 0 else 0.0
     remaining = INTERBLOCK_MIN_REST
+
+    kb.clearEvents()   # discard anything stale before starting the wait
 
     while remaining > 0:
         msg = (
@@ -1653,25 +1663,34 @@ def show_break_screen(block_completed, block_correct, block_total):
         win.flip()
         core.wait(1.0)
         remaining -= 1.0
-        if event.getKeys(keyList=['escape']):
+        pressed = kb.getKeys(keyList=['escape'], waitRelease=False)
+        if pressed:
+            print(f"[break] ESC pressed during countdown for block {block_completed}")
             return 'abort'
 
-    # Enable SPACE
+    kb.clearEvents()   # fresh buffer for the SPACE wait
+
+    # Flip-based poll (same pattern as the response window) so Windows'
+    # message queue keeps getting pumped and keyboard events register.
+    msg = (
+        f"Block {block_completed} of {N_BLOCKS} complete.\n\n"
+        f"Correct: {block_correct}/{block_total} ({pct:.1f}%)\n\n"
+        f"Rest for a moment.\n"
+        f"Please stay still.\n\n"
+        f"Experimenter: press SPACE to continue"
+    )
+    break_stim = visual.TextStim(
+        win, text=msg, color='white', height=32, wrapWidth=1000,
+    )
     while True:
-        msg = (
-            f"Block {block_completed} of {N_BLOCKS} complete.\n\n"
-            f"Correct: {block_correct}/{block_total} ({pct:.1f}%)\n\n"
-            f"Rest for a moment.\n"
-            f"Please stay still.\n\n"
-            f"Experimenter: press SPACE to continue"
-        )
-        break_stim = visual.TextStim(
-            win, text=msg, color='white', height=32, wrapWidth=1000,
-        )
         break_stim.draw()
         win.flip()
-        keys = event.waitKeys(keyList=['space', 'escape'])
+        pressed = kb.getKeys(keyList=['space', 'escape'], waitRelease=False)
+        if not pressed:
+            continue
+        keys = [k.name for k in pressed]
         if 'escape' in keys:
+            print(f"[break] ESC pressed at SPACE-wait for block {block_completed}")
             return 'abort'
         if 'space' in keys:
             return 'continue'
@@ -1707,6 +1726,8 @@ if not aborted:
                 all_presses_global=all_presses_global,
             )
             if result.get('aborted'):
+                print(f"[abort] main block {block_i} trial {overall_trial}: "
+                      f"aborted flag returned by run_trial")
                 aborted = True
                 el_tracker.sendMessage(f'EXPERIMENT_ABORTED trial {overall_trial}')
                 break
@@ -1730,6 +1751,7 @@ if not aborted:
         if block_i < N_BLOCKS:
             result = show_break_screen(block_i, block_correct, block_total)
             if result == 'abort':
+                print(f"[abort] show_break_screen returned 'abort' after block {block_i}")
                 aborted = True
                 el_tracker.sendMessage(f'EXPERIMENT_ABORTED break {block_i}')
                 break
