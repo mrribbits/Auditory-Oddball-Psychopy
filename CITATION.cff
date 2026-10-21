@@ -1,0 +1,92 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata from this file."
+type: software
+title: "Auditory-Oddball-Psychopy: cued auditory oddball task for OPM-MEG"
+version: "v1.0.0"
+date-released: "2026-10-15"
+abstract: >-
+  PsychoPy implementation of an active, cued auditory oddball task for OPM-MEG with
+  simultaneous EyeLink eye tracking, used at the Scully Center for the Neuroscience of
+  Mind & Behavior (Princeton Neuroscience Institute). Adapted from the FieldTrip NatMEG 2014
+  auditory oddball tutorial. An arrow cue sets the response hand; 3-7 standard tones
+  (1000 Hz) are followed by one deviant tone (1200 Hz), and the participant presses the
+  index-finger button on the cued hand. Uses VPixx pixel-mode triggers and
+  hardware-scheduled VPixx audio.
+authors:
+  - family-names: "Pinsk"
+    given-names: "Mark"
+    affiliation: "Princeton Neuroscience Institute, Princeton University"
+    orcid: "https://orcid.org/0000-0002-6457-624X"
+repository-code: "https://github.com/mrribbits/Auditory-Oddball-Psychopy"
+keywords:
+  - "auditory oddball"
+  - "mismatch negativity"
+  - "MEG"
+  - "OPM"
+  - "PsychoPy"
+  - "VPixx"
+  - "EyeLink"
+license: "MIT"
+references:
+  - type: article
+    title: "FieldTrip: Open source software for advanced analysis of MEG, EEG, and invasive electrophysiological data"
+    authors:
+      - family-names: "Oostenveld"
+        given-names: "R."
+      - family-names: "Fries"
+        given-names: "P."
+      - family-names: "Maris"
+        given-names: "E."
+      - family-names: "Schoffelen"
+        given-names: "J.-M."
+    journal: "Computational Intelligence and Neuroscience"
+    year: 2011
+    doi: "10.1155/2011/156869"
+  - type: article
+    title: "Two varieties of long-latency positive waves evoked by unpredictable auditory stimuli in man"
+    authors:
+      - family-names: "Squires"
+        given-names: "N. K."
+      - family-names: "Squires"
+        given-names: "K. C."
+      - family-names: "Hillyard"
+        given-names: "S. A."
+    journal: "Electroencephalography and Clinical Neurophysiology"
+    year: 1975
+    doi: "10.1016/0013-4694(75)90263-1"
+  - type: article
+    title: "Evoked-potential correlates of stimulus uncertainty"
+    authors:
+      - family-names: "Sutton"
+        given-names: "S."
+      - family-names: "Braren"
+        given-names: "M."
+      - family-names: "Zubin"
+        given-names: "J."
+      - family-names: "John"
+        given-names: "E. R."
+    journal: "Science"
+    year: 1965
+    doi: "10.1126/science.150.3700.1187"
+  - type: article
+    title: "MEG studies of sensorimotor rhythms: A review"
+    authors:
+      - family-names: "Cheyne"
+        given-names: "D. O."
+    journal: "Experimental Neurology"
+    year: 2013
+    doi: "10.1016/j.expneurol.2012.08.030"
+  - type: article
+    title: "The mismatch negativity (MMN) in basic research of central auditory processing: a review"
+    authors:
+      - family-names: "Näätänen"
+        given-names: "R."
+      - family-names: "Paavilainen"
+        given-names: "P."
+      - family-names: "Rinne"
+        given-names: "T."
+      - family-names: "Alho"
+        given-names: "K."
+    journal: "Clinical Neurophysiology"
+    year: 2007
+    doi: "10.1016/j.clinph.2007.04.026"
