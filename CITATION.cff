@@ -4,6 +4,7 @@ type: software
 title: "Auditory-Oddball-Psychopy: cued auditory oddball task for OPM-MEG"
 version: "v1.0.0"
 date-released: "2026-10-15"
+doi: "10.5281/zenodo.23541403"
 abstract: >-
   PsychoPy implementation of an active, cued auditory oddball task for OPM-MEG with
   simultaneous EyeLink eye tracking, used at the Scully Center for the Neuroscience of
@@ -17,7 +18,7 @@ authors:
     given-names: "Mark"
     affiliation: "Princeton Neuroscience Institute, Princeton University"
     orcid: "https://orcid.org/0000-0002-6457-624X"
-repository-code: "https://github.com/mrribbits/Auditory-Oddball-Psychopy"
+repository-code: "https://github.com/mrribbits/Oddball-S2027"
 keywords:
   - "auditory oddball"
   - "mismatch negativity"
