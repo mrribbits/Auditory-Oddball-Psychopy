@@ -1,5 +1,7 @@
 # OPM-MEG Active Oddball
 
+[![DOI](https://zenodo.org/badge/1286565407.svg)](https://doi.org/10.5281/zenodo.23541403)
+
 PsychoPy script for an active auditory oddball paradigm in the Scully OPM-MEG facility. Based on the [FieldTrip cued oddball paradigm](https://www.fieldtriptoolbox.org/workshop/natmeg2014/meg_audodd/).
 
 Bimanual left/right index-finger responses, 3 blocks × 100 trials (~51 minutes), continuous EyeLink recording, VPIXX pixel-mode triggers, and hardware-scheduled VPIXX audio.
