@@ -30,6 +30,7 @@ The subject sees an arrow cue directing them to prepare a left- or right-hand re
 - PsychoPy 2026.1+
 - pypixxlib (VPIXX)
 - pylink (SR Research)
+- You must obtain EyeLinkCoreGraphicsPsychoPy.py from SR Research's EyeLink Developers Kit.
 
 For Windows setup, an installer script that installs PsychoPy and the required dependencies is available at [ScullyCenter-Psychopy-Install-Win](https://github.com/mrribbits/ScullyCenter-Psychopy-Install-Win).
 
