@@ -23,7 +23,6 @@ The subject sees an arrow cue directing them to prepare a left- or right-hand re
 ## Files
 
 - `oddball_active_cued_ft_VPIXXaudio_KBDinput.py` — main script
-- `EyeLinkCoreGraphicsPsychoPy.py` — renders EyeLink calibration graphics inside PsychoPy
 - `*.wav` — sound files used by EyeLink for calibration / target beeps
 
 ## Requirements
@@ -45,13 +44,7 @@ For Windows setup, an installer script that installs PsychoPy and the required d
 
 Most common way: open the `.py` file in the **PsychoPy Coder** window and click Run.
 
-Alternative for users with PsychoPy installed in a conda environment:
-
-```bash
-python oddball_active_cued_ft_VPIXXaudio_KBDinput.py
-```
-
-Either way, a startup dialog asks for participant ID, session number, and two dummy-mode checkboxes:
+A startup dialog asks for participant ID, session number, and two dummy-mode checkboxes:
 
 - **`dummy_eyelink`** — run without EyeLink Host PC. Auto-forced on if `pylink` isn't installed.
 - **`dummy_vpixx`** — run without a DATAPixx3. Audio falls back to PsychoPy sound (audible but not vsync-locked), and `*_vp` / `*_vp_est` columns in the output CSVs are left blank. Auto-forced on if `pypixxlib` isn't installed.
